@@ -30,11 +30,13 @@ The server will be available at http://localhost:5001
 
 ### Testing the Server
 
-#### 1. Install Testing Dependencies
+#### 1. Install/Update Dependencies
 ```bash
 source venv/bin/activate
-pip install -r requirements.txt  # Includes requests library for testing
+pip install -r requirements.txt  # Includes all dependencies (requests, dateutil, click, etc.)
 ```
+
+**Note:** If you get import errors after pulling updates, make sure to run `pip install -r requirements.txt` to install new dependencies.
 
 #### 2. Initialize Database with Sample Data
 ```bash
@@ -129,6 +131,42 @@ python test_sync.py
 
 # Test performance with large datasets
 python test_performance.py
+
+# Test CLI functionality
+python test_cli.py
+```
+
+## CLI Usage
+
+The Message Hub includes a command-line interface for easy access:
+
+```bash
+# Make CLI executable (first time only)
+chmod +x message-hub
+
+# Show help
+./message-hub --help
+
+# Show server status
+./message-hub status
+
+# List messages
+./message-hub messages --limit 10
+
+# List messages with filters
+./message-hub messages --type SMS --limit 5
+./message-hub messages --device android-phone-1 --verbose
+./message-hub messages --unread
+
+# Mark message as read
+./message-hub mark-read <message-id>
+
+# Perform delta sync
+./message-hub sync
+
+# Configure CLI
+./message-hub config-set --server-url http://your-server:5001
+./message-hub config-show
 ```
 
 ### Alternative: Using Docker

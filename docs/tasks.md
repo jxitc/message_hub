@@ -28,18 +28,18 @@
 - [x] **3.7** Add error handling and HTTP status codes
 
 ### 4. Delta Sync Implementation  
-- [ ] **4.1** Add timestamp-based sync endpoint GET /api/v1/sync/messages
-- [ ] **4.2** Implement query parameters (since, limit, device_filter)
-- [ ] **4.3** Add pagination and has_more logic
-- [ ] **4.4** Handle merge/dedup for overlapping time ranges
-- [ ] **4.5** Test sync performance with large datasets
+- [x] **4.1** Add timestamp-based sync endpoint GET /api/v1/sync/messages
+- [x] **4.2** Implement query parameters (since, limit, device_filter)
+- [x] **4.3** Add pagination and has_more logic
+- [x] **4.4** Handle merge/dedup for overlapping time ranges
+- [x] **4.5** Test sync performance with large datasets
 
 ### 5. CLI Interface (MVP)
-- [ ] **5.1** Create basic CLI application structure (Click framework)
-- [ ] **5.2** Implement `message-hub messages` command (basic listing)
-- [ ] **5.3** Add basic filtering options (--limit, --type)
-- [ ] **5.4** Implement `message-hub mark-read` command
-- [ ] **5.5** Add CLI configuration management (server URL, etc.)
+- [x] **5.1** Create basic CLI application structure (Click framework)
+- [x] **5.2** Implement `message-hub messages` command (basic listing)
+- [x] **5.3** Add basic filtering options (--limit, --type)
+- [x] **5.4** Implement `message-hub mark-read` command
+- [x] **5.5** Add CLI configuration management (server URL, etc.)
 
 ### 6. Web Interface (MVP)
 - [ ] **6.1** Setup basic Flask templates and static files
