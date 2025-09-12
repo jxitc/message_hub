@@ -140,7 +140,16 @@ def messages(limit, type, device, unread, verbose):
         return
     
     if response.status_code != 200:
-        click.echo(f"❌ Error: {response.status_code} - {response.text}", err=True)
+        click.echo(f"❌ Error getting messages: {response.status_code}", err=True)
+        try:
+            error_data = response.json()
+            error_msg = error_data.get('error', 'Unknown error')
+            click.echo(f"   Server error: {error_msg}", err=True)
+            
+            if response.status_code == 500:
+                click.echo("   💡 Try running: python init_db.py (on server)", err=True)
+        except:
+            click.echo(f"   Raw response: {response.text}", err=True)
         return
     
     data = response.json()
@@ -188,7 +197,8 @@ def mark_read(message_id):
         click.echo(f"❌ Error: {response.status_code} - {response.text}", err=True)
 
 @cli.command()
-def status():
+@click.option('--verbose', '-v', is_flag=True, help='Show detailed error information')
+def status(verbose):
     """Show server status and statistics"""
     
     # Get health status
@@ -198,6 +208,12 @@ def status():
     
     if health_response.status_code != 200:
         click.echo(f"❌ Server unhealthy: {health_response.status_code}", err=True)
+        if verbose:
+            try:
+                error_data = health_response.json()
+                click.echo(f"   Error details: {error_data}", err=True)
+            except:
+                click.echo(f"   Raw response: {health_response.text}", err=True)
         return
     
     # Get sync status
@@ -207,6 +223,24 @@ def status():
     
     if sync_response.status_code != 200:
         click.echo(f"❌ Could not get sync status: {sync_response.status_code}", err=True)
+        
+        # Show detailed error information
+        try:
+            error_data = sync_response.json()
+            error_msg = error_data.get('error', 'Unknown error')
+            click.echo(f"   Server error: {error_msg}", err=True)
+            
+            if verbose or sync_response.status_code == 500:
+                click.echo(f"   Full response: {sync_response.text}", err=True)
+                
+            # Provide helpful hints for common errors
+            if sync_response.status_code == 500:
+                click.echo("   💡 Common causes:", err=True)
+                click.echo("      - Database not initialized (run: python init_db.py)", err=True)
+                click.echo("      - Missing dependencies (run: pip install -r requirements.txt)", err=True)
+                click.echo("      - Server configuration issues", err=True)
+        except:
+            click.echo(f"   Raw response: {sync_response.text}", err=True)
         return
     
     sync_data = sync_response.json()
@@ -291,6 +325,54 @@ def config_show():
         click.echo("   ✅ Config file exists")
     else:
         click.echo("   ⚠️  Config file not found (using defaults)")
+
+@cli.command()
+def test():
+    """Test connectivity to the server"""
+    
+    click.echo(f"🔍 Testing connection to: {config.server_url}")
+    
+    # Test basic connectivity
+    response = make_request('/health')
+    if not response:
+        click.echo("❌ Cannot connect to server")
+        return
+    
+    if response.status_code == 200:
+        click.echo("✅ Health endpoint working")
+        health_data = response.json()
+        click.echo(f"   Service: {health_data.get('service', 'Unknown')}")
+        click.echo(f"   Status: {health_data.get('status', 'Unknown')}")
+    else:
+        click.echo(f"❌ Health endpoint failed: {response.status_code}")
+        return
+    
+    # Test sync status
+    sync_response = make_request('/api/v1/sync/status')
+    if sync_response and sync_response.status_code == 200:
+        click.echo("✅ Sync status endpoint working")
+        sync_data = sync_response.json()
+        click.echo(f"   Total messages: {sync_data.get('total_messages', 0)}")
+    else:
+        click.echo("❌ Sync status endpoint failed")
+        if sync_response:
+            click.echo(f"   Status code: {sync_response.status_code}")
+            try:
+                error_data = sync_response.json()
+                click.echo(f"   Error: {error_data.get('error', 'Unknown')}")
+            except:
+                click.echo(f"   Raw response: {sync_response.text}")
+    
+    # Test messages endpoint
+    messages_response = make_request('/api/v1/messages', params={'per_page': 1})
+    if messages_response and messages_response.status_code == 200:
+        click.echo("✅ Messages endpoint working")
+    else:
+        click.echo("❌ Messages endpoint failed")
+        if messages_response:
+            click.echo(f"   Status code: {messages_response.status_code}")
+    
+    click.echo("\n🎯 Connection test complete!")
 
 if __name__ == '__main__':
     cli()

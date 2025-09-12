@@ -147,6 +147,9 @@ chmod +x message-hub
 # Show help
 ./message-hub --help
 
+# Test server connectivity
+./message-hub test
+
 # Show server status
 ./message-hub status
 
