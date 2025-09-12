@@ -107,6 +107,30 @@ curl http://127.0.0.1:5001/api/v1/messages?page=1&per_page=10
 curl -X PUT http://127.0.0.1:5001/api/v1/messages/{message_id}/read
 ```
 
+**Delta Sync (Efficient Synchronization):**
+```bash
+# Get sync status
+curl http://127.0.0.1:5001/api/v1/sync/status
+
+# Full sync (all messages)  
+curl http://127.0.0.1:5001/api/v1/sync/messages?limit=50
+
+# Delta sync (only new messages since timestamp)
+curl http://127.0.0.1:5001/api/v1/sync/messages?since=2024-01-01T12:00:00Z&limit=50
+
+# Filtered sync
+curl http://127.0.0.1:5001/api/v1/sync/messages?device=my-phone&type=SMS&limit=50
+```
+
+**Specialized Testing:**
+```bash
+# Test delta sync functionality
+python test_sync.py
+
+# Test performance with large datasets
+python test_performance.py
+```
+
 ### Alternative: Using Docker
 
 ```bash
@@ -125,7 +149,8 @@ docker-compose up postgres  # Only PostgreSQL (not needed for SQLite)
 - `PUT /api/v1/messages/:id/read` - Mark message as read
 - `GET /api/v1/devices` - List registered devices
 - `POST /api/v1/devices/register` - Register new device with API key
-- `GET /api/v1/sync/messages` - Delta sync messages (placeholder)
+- `GET /api/v1/sync/messages` - Delta sync messages with timestamp-based filtering
+- `GET /api/v1/sync/status` - Get sync status and statistics
 
 ## Project Structure
 
