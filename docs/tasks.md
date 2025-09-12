@@ -6,20 +6,20 @@
 - [x] **1.1** Initialize Flask project structure
 - [x] **1.2** Create requirements.txt with core dependencies
 - [x] **1.3** Setup development environment configuration (.env, config.py)
-- [x] **1.4** Create Docker Compose for PostgreSQL
+- [x] **1.4** Create Docker Compose for PostgreSQL (switched to SQLite for simplicity)
 - [x] **1.5** Initialize git repository structure
 - [x] **1.6** Setup basic logging with Flask logging
 
 ### 2. Database Foundation
-- [ ] **2.1** Create database connection and SQLAlchemy setup
-- [ ] **2.2** Implement Messages table schema
-- [ ] **2.3** Implement Devices table schema
+- [x] **2.1** Create database connection and SQLAlchemy setup
+- [x] **2.2** Implement Messages table schema
+- [x] **2.3** Implement Devices table schema
 - [ ] **2.4** Create database indexes for performance
-- [ ] **2.5** Add database migration system (Flask-Migrate)
+- [x] **2.5** Add database migration system (Flask-Migrate)
 - [ ] **2.6** Create seed data for testing
 
 ### 3. Core API Endpoints (No Authentication)
-- [ ] **3.1** Setup Flask application structure and routing
+- [x] **3.1** Setup Flask application structure and routing
 - [ ] **3.2** Implement POST /api/v1/messages (message forwarding)
 - [ ] **3.3** Implement GET /api/v1/messages (basic message retrieval)
 - [ ] **3.4** Implement GET /api/v1/messages/:id (single message)
@@ -173,7 +173,7 @@
 ## Dependencies & Prerequisites
 
 **Phase 1 Prerequisites:**
-- PostgreSQL database
+- SQLite database (file-based, no server needed)
 - Python 3.8+ environment
 - Basic understanding of Flask framework
 
