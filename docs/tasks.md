@@ -27,72 +27,65 @@
 - [x] **3.6** Add request validation using Marshmallow
 - [x] **3.7** Add error handling and HTTP status codes
 
-### 4. Device Management (Basic)
-- [x] **4.1** Implement POST /api/v1/devices/register (basic registration)
-- [x] **4.2** Implement GET /api/v1/devices (list devices)
-- [x] **4.3** Generate simple device IDs for MVP
+### 4. Delta Sync Implementation  
+- [ ] **4.1** Add timestamp-based sync endpoint GET /api/v1/sync/messages
+- [ ] **4.2** Implement query parameters (since, limit, device_filter)
+- [ ] **4.3** Add pagination and has_more logic
+- [ ] **4.4** Handle merge/dedup for overlapping time ranges
+- [ ] **4.5** Test sync performance with large datasets
 
-### 5. Delta Sync Implementation
-- [ ] **5.1** Add timestamp-based sync endpoint GET /api/v1/sync/messages
-- [ ] **5.2** Implement query parameters (since, limit, device_filter)
-- [ ] **5.3** Add pagination and has_more logic
-- [ ] **5.4** Handle merge/dedup for overlapping time ranges
-- [ ] **5.5** Test sync performance with large datasets
+### 5. CLI Interface (MVP)
+- [ ] **5.1** Create basic CLI application structure (Click framework)
+- [ ] **5.2** Implement `message-hub messages` command (basic listing)
+- [ ] **5.3** Add basic filtering options (--limit, --type)
+- [ ] **5.4** Implement `message-hub mark-read` command
+- [ ] **5.5** Add CLI configuration management (server URL, etc.)
 
-### 6. CLI Interface (MVP)
-- [ ] **6.1** Create basic CLI application structure (Click framework)
-- [ ] **6.2** Implement `message-hub messages` command (basic listing)
-- [ ] **6.3** Implement `message-hub devices` command (basic listing)
-- [ ] **6.4** Add basic filtering options (--limit, --device, --type)
-- [ ] **6.5** Implement `message-hub mark-read` command
-- [ ] **6.6** Add CLI configuration management (server URL, etc.)
+### 6. Web Interface (MVP)
+- [ ] **6.1** Setup basic Flask templates and static files
+- [ ] **6.2** Create simple dashboard with message overview
+- [ ] **6.3** Implement basic message detail view
+- [ ] **6.4** Implement basic filtering UI (by type)
+- [ ] **6.5** Make interface mobile-friendly (responsive design)
 
-### 7. Web Interface (MVP)
-- [ ] **7.1** Setup basic Flask templates and static files
-- [ ] **7.2** Create simple dashboard with message overview
-- [ ] **7.3** Implement basic message detail view
-- [ ] **7.4** Add simple device management interface
-- [ ] **7.5** Implement basic filtering UI (by type, device)
-- [ ] **7.6** Make interface mobile-friendly (responsive design)
-
-### 8. MVP Testing & Validation
-- [ ] **8.1** Create unit tests for core endpoints
-- [ ] **8.2** Create integration tests for message flow
-- [ ] **8.3** Test with sample Android SMS forwarding
-- [ ] **8.4** Performance testing for sync operations
-- [ ] **8.5** Add API documentation (basic)
-- [ ] **8.6** Test CLI interface functionality
-- [ ] **8.7** Test web interface functionality
+### 7. MVP Testing & Validation
+- [ ] **7.1** Create unit tests for core endpoints
+- [ ] **7.2** Create integration tests for message flow
+- [ ] **7.3** Test with sample Android SMS forwarding
+- [ ] **7.4** Performance testing for sync operations
+- [ ] **7.5** Add API documentation (basic)
+- [ ] **7.6** Test CLI interface functionality
+- [ ] **7.7** Test web interface functionality
 
 ## Phase 2: Enhanced Features
 
-### 9. Authentication System
-- [ ] **9.1** Implement API key generation system
-- [ ] **9.2** Add API key validation middleware
-- [ ] **9.3** Update all endpoints to require authentication
-- [ ] **9.4** Implement device registration with API keys
-- [ ] **9.5** Add API key rotation capability
+### 8. Device Management & Authentication
+- [ ] **8.1** Implement POST /api/v1/devices/register (device registration)
+- [ ] **8.2** Implement GET /api/v1/devices (list devices)
+- [ ] **8.3** Generate API keys for devices
+- [ ] **8.4** Add API key validation middleware
+- [ ] **8.5** Update all endpoints to optionally use authentication
 
-### 10. Improved Message Handling
-- [ ] **10.1** Enhanced metadata flexibility for different sources
-- [ ] **10.2** Message type validation and categorization
-- [ ] **10.3** Add message tagging system
-- [ ] **10.4** Implement message priority handling
-- [ ] **10.5** Add timezone handling for global sources
+### 9. Enhanced Message Handling
+- [ ] **9.1** Enhanced metadata flexibility for different sources
+- [ ] **9.2** Message type validation and categorization
+- [ ] **9.3** Add message tagging system
+- [ ] **9.4** Implement message priority handling
+- [ ] **9.5** Add timezone handling for global sources
 
-### 11. Enhanced CLI Interface
-- [ ] **11.1** Add advanced search and filtering options
-- [ ] **11.2** Implement CLI installation and distribution
-- [ ] **11.3** Add bulk operations (mark multiple as read)
-- [ ] **11.4** Add export capabilities
-- [ ] **11.5** Implement CLI plugins system
+### 10. Enhanced CLI Interface
+- [ ] **10.1** Add advanced search and filtering options
+- [ ] **10.2** Implement CLI installation and distribution
+- [ ] **10.3** Add bulk operations (mark multiple as read)
+- [ ] **10.4** Add export capabilities
+- [ ] **10.5** Implement CLI plugins system
 
-### 12. Enhanced Web Interface
-- [ ] **12.1** Add advanced search functionality
-- [ ] **12.2** Implement settings and configuration page
-- [ ] **12.3** Add bulk operations UI
-- [ ] **12.4** Implement dark mode and themes
-- [ ] **12.5** Add export and backup features
+### 11. Enhanced Web Interface
+- [ ] **11.1** Add advanced search functionality
+- [ ] **11.2** Implement settings and configuration page
+- [ ] **11.3** Add bulk operations UI
+- [ ] **11.4** Implement dark mode and themes
+- [ ] **11.5** Add export and backup features
 
 ## Phase 3: Production & Deployment
 
