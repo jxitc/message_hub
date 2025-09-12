@@ -30,31 +30,82 @@ The server will be available at http://localhost:5001
 
 ### Testing the Server
 
-Once the server is running, you can test the endpoints:
+#### 1. Install Testing Dependencies
+```bash
+source venv/bin/activate
+pip install -r requirements.txt  # Includes requests library for testing
+```
 
-1. **Health Check**:
-   ```bash
-   curl http://127.0.0.1:5001/health
-   ```
-   Expected response: `{"status":"healthy","service":"message-hub"}`
+#### 2. Initialize Database with Sample Data
+```bash
+python init_db.py
+```
+This creates the database tables and adds sample messages and devices for testing.
 
-2. **API Info**:
-   ```bash
-   curl http://127.0.0.1:5001/
-   ```
-   Shows available endpoints and service information
+#### 3. Quick Health Check
+```bash
+curl http://127.0.0.1:5001/health
+```
+Expected response: `{"status":"healthy","service":"message-hub"}`
 
-3. **Test API Endpoints**:
-   ```bash
-   # List messages (currently returns empty array)
-   curl http://127.0.0.1:5001/api/v1/messages
-   
-   # List devices (currently returns empty array)
-   curl http://127.0.0.1:5001/api/v1/devices
-   
-   # Sync messages (placeholder response)
-   curl http://127.0.0.1:5001/api/v1/sync/messages
-   ```
+#### 4. Automated API Testing
+```bash
+python test_api.py
+```
+Runs comprehensive tests of all API endpoints including:
+- Device registration and listing
+- Message creation, retrieval, and filtering
+- Marking messages as read
+- Pagination testing
+
+**Note:** Test data is NOT deleted - it remains in the database for inspection.
+
+#### 5. Manual API Testing
+
+**Register a Device:**
+```bash
+curl -X POST http://127.0.0.1:5001/api/v1/devices/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "my-phone",
+    "name": "My Test Phone", 
+    "type": "android"
+  }'
+```
+
+**Create a Message:**
+```bash
+curl -X POST http://127.0.0.1:5001/api/v1/messages \
+  -H "Content-Type: application/json" \
+  -d '{
+    "source_device_id": "my-phone",
+    "type": "SMS",
+    "sender": "+1234567890",
+    "content": "Hello World!",
+    "timestamp": "2024-01-01T12:00:00Z",
+    "metadata": {"priority": "normal"}
+  }'
+```
+
+**List Messages:**
+```bash
+# All messages
+curl http://127.0.0.1:5001/api/v1/messages
+
+# Filter by type
+curl http://127.0.0.1:5001/api/v1/messages?type=SMS
+
+# Filter by device
+curl http://127.0.0.1:5001/api/v1/messages?device=my-phone
+
+# Pagination
+curl http://127.0.0.1:5001/api/v1/messages?page=1&per_page=10
+```
+
+**Mark Message as Read:**
+```bash
+curl -X PUT http://127.0.0.1:5001/api/v1/messages/{message_id}/read
+```
 
 ### Alternative: Using Docker
 
@@ -68,12 +119,12 @@ docker-compose up postgres  # Only PostgreSQL (not needed for SQLite)
 
 - `GET /health` - Health check
 - `GET /` - Service information and available endpoints
-- `GET /api/v1/messages` - List messages (placeholder)
-- `POST /api/v1/messages` - Create message (placeholder)
-- `GET /api/v1/messages/:id` - Get single message (placeholder)
-- `PUT /api/v1/messages/:id/read` - Mark message as read (placeholder)
-- `GET /api/v1/devices` - List devices (placeholder)
-- `POST /api/v1/devices/register` - Register device (placeholder)
+- `GET /api/v1/messages` - List messages with pagination and filtering
+- `POST /api/v1/messages` - Create/forward new message
+- `GET /api/v1/messages/:id` - Get single message by ID
+- `PUT /api/v1/messages/:id/read` - Mark message as read
+- `GET /api/v1/devices` - List registered devices
+- `POST /api/v1/devices/register` - Register new device with API key
 - `GET /api/v1/sync/messages` - Delta sync messages (placeholder)
 
 ## Project Structure

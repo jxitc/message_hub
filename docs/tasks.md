@@ -14,23 +14,23 @@
 - [x] **2.1** Create database connection and SQLAlchemy setup
 - [x] **2.2** Implement Messages table schema
 - [x] **2.3** Implement Devices table schema
-- [ ] **2.4** Create database indexes for performance
+- [x] **2.4** Create database indexes for performance
 - [x] **2.5** Add database migration system (Flask-Migrate)
-- [ ] **2.6** Create seed data for testing
+- [x] **2.6** Create seed data for testing
 
 ### 3. Core API Endpoints (No Authentication)
 - [x] **3.1** Setup Flask application structure and routing
-- [ ] **3.2** Implement POST /api/v1/messages (message forwarding)
-- [ ] **3.3** Implement GET /api/v1/messages (basic message retrieval)
-- [ ] **3.4** Implement GET /api/v1/messages/:id (single message)
-- [ ] **3.5** Implement PUT /api/v1/messages/:id/read (mark as read)
-- [ ] **3.6** Add request validation using Marshmallow
-- [ ] **3.7** Add error handling and HTTP status codes
+- [x] **3.2** Implement POST /api/v1/messages (message forwarding)
+- [x] **3.3** Implement GET /api/v1/messages (basic message retrieval)
+- [x] **3.4** Implement GET /api/v1/messages/:id (single message)
+- [x] **3.5** Implement PUT /api/v1/messages/:id/read (mark as read)
+- [x] **3.6** Add request validation using Marshmallow
+- [x] **3.7** Add error handling and HTTP status codes
 
 ### 4. Device Management (Basic)
-- [ ] **4.1** Implement POST /api/v1/devices/register (basic registration)
-- [ ] **4.2** Implement GET /api/v1/devices (list devices)
-- [ ] **4.3** Generate simple device IDs for MVP
+- [x] **4.1** Implement POST /api/v1/devices/register (basic registration)
+- [x] **4.2** Implement GET /api/v1/devices (list devices)
+- [x] **4.3** Generate simple device IDs for MVP
 
 ### 5. Delta Sync Implementation
 - [ ] **5.1** Add timestamp-based sync endpoint GET /api/v1/sync/messages
