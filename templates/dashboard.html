@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - Message Hub{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="display-6 mb-0">
+            <i class="bi bi-speedometer2"></i> Dashboard
+        </h1>
+        <p class="text-muted">Message Hub Server Overview</p>
+    </div>
+</div>
+
+<!-- Stats Cards Row -->
+<div class="row mb-4">
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-start-primary">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Total Messages</h6>
+                        <h2 class="card-title mb-0">{{ stats.total_messages or 0 }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-envelope-fill text-primary fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-start-warning">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Unread</h6>
+                        <h2 class="card-title mb-0">{{ stats.unread_count or 0 }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-envelope-exclamation text-warning fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-start-success">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Last 24h</h6>
+                        <h2 class="card-title mb-0">{{ stats.recent_count or 0 }}</h2>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-clock-history text-success fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3 mb-3">
+        <div class="card h-100 border-start-info">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2 text-muted">Latest Message</h6>
+                        <small class="card-text">
+                            {% if stats.latest_timestamp %}
+                                {{ stats.latest_timestamp.strftime('%Y-%m-%d %H:%M') }}
+                            {% else %}
+                                No messages
+                            {% endif %}
+                        </small>
+                    </div>
+                    <div class="align-self-center">
+                        <i class="bi bi-calendar-check text-info fs-2"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Stats Charts Row -->
+<div class="row mb-4">
+    <!-- Message Types Chart -->
+    <div class="col-lg-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-pie-chart"></i> Messages by Type
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if stats.type_stats %}
+                    <div class="row">
+                        {% for msg_type, count in stats.type_stats.items() %}
+                        <div class="col-6 mb-3">
+                            <div class="d-flex align-items-center">
+                                <div class="me-3">
+                                    {% if msg_type == 'SMS' %}
+                                        <i class="bi bi-chat-text text-primary fs-4"></i>
+                                    {% elif msg_type == 'PUSH_NOTIFICATION' %}
+                                        <i class="bi bi-bell text-warning fs-4"></i>
+                                    {% elif msg_type == 'EMAIL' %}
+                                        <i class="bi bi-envelope text-info fs-4"></i>
+                                    {% elif msg_type == 'CALL_LOG' %}
+                                        <i class="bi bi-telephone text-success fs-4"></i>
+                                    {% else %}
+                                        <i class="bi bi-question-circle text-secondary fs-4"></i>
+                                    {% endif %}
+                                </div>
+                                <div>
+                                    <div class="fw-bold">{{ count }}</div>
+                                    <small class="text-muted">{{ msg_type.replace('_', ' ').title() }}</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                        <p>No messages found</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <!-- Device Stats -->
+    <div class="col-lg-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-phone"></i> Messages by Device
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if stats.device_stats %}
+                    {% for device, count in stats.device_stats.items() %}
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="d-flex align-items-center">
+                            <i class="bi bi-device-ssd text-secondary me-2"></i>
+                            <span>{{ device or 'Unknown Device' }}</span>
+                        </div>
+                        <span class="badge bg-primary rounded-pill">{{ count }}</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-phone fs-1 d-block mb-2"></i>
+                        <p>No devices found</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Recent Messages -->
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-clock-history"></i> Recent Messages
+                </h5>
+                <a href="{{ url_for('web.messages') }}" class="btn btn-primary btn-sm">
+                    <i class="bi bi-arrow-right"></i> View All
+                </a>
+            </div>
+            <div class="card-body p-0">
+                {% if recent_messages %}
+                    {% for message in recent_messages %}
+                    <div class="d-flex align-items-center p-3 border-bottom message-preview 
+                                {{ 'border-start-warning' if not message.is_read else '' }}">
+                        <div class="me-3">
+                            <span class="status-indicator {{ 'status-unread' if not message.is_read else 'status-read' }}"></span>
+                        </div>
+                        <div class="me-3">
+                            {% if message.type == 'SMS' %}
+                                <i class="bi bi-chat-text text-primary fs-5"></i>
+                            {% elif message.type == 'PUSH_NOTIFICATION' %}
+                                <i class="bi bi-bell text-warning fs-5"></i>
+                            {% elif message.type == 'EMAIL' %}
+                                <i class="bi bi-envelope text-info fs-5"></i>
+                            {% elif message.type == 'CALL_LOG' %}
+                                <i class="bi bi-telephone text-success fs-5"></i>
+                            {% else %}
+                                <i class="bi bi-question-circle text-secondary fs-5"></i>
+                            {% endif %}
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="d-flex justify-content-between align-items-start mb-1">
+                                <strong>{{ message.sender or 'Unknown Sender' }}</strong>
+                                <small class="text-muted">
+                                    {{ message.timestamp.strftime('%Y-%m-%d %H:%M') if message.timestamp else 'Unknown' }}
+                                </small>
+                            </div>
+                            <p class="mb-1 text-truncate-2">{{ message.content or 'No content' }}</p>
+                            <small class="text-muted">
+                                <i class="bi bi-device-ssd"></i> {{ message.source_device_id or 'Unknown Device' }}
+                            </small>
+                        </div>
+                        <div class="ms-3">
+                            <a href="{{ url_for('web.message_detail', message_id=message.id) }}" 
+                               class="btn btn-outline-primary btn-sm">
+                                <i class="bi bi-eye"></i>
+                            </a>
+                            {% if not message.is_read %}
+                            <button class="btn btn-outline-success btn-sm ms-1 btn-mark-read" 
+                                    data-message-id="{{ message.id }}"
+                                    data-bs-toggle="tooltip" 
+                                    title="Mark as read">
+                                <i class="bi bi-check"></i>
+                            </button>
+                            {% endif %}
+                        </div>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-inbox fs-1 d-block mb-3"></i>
+                        <h5>No Messages Yet</h5>
+                        <p>Messages will appear here once your devices start forwarding them.</p>
+                        <a href="{{ url_for('web.status') }}" class="btn btn-outline-primary">
+                            <i class="bi bi-activity"></i> Check Server Status
+                        </a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auto-refresh controls -->
+<div class="position-fixed bottom-0 end-0 p-3">
+    <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="auto-refresh">
+        <label class="form-check-label small" for="auto-refresh">
+            Auto-refresh
+        </label>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Dashboard-specific JavaScript
+document.addEventListener('DOMContentLoaded', function() {
+    // Initialize dashboard
+    initDashboard();
+});
+
+function initDashboard() {
+    // Check server status every 30 seconds
+    setInterval(MessageHub.checkServerStatus, 30000);
+    
+    // Update stats every minute if auto-refresh is enabled
+    setInterval(function() {
+        const autoRefresh = document.getElementById('auto-refresh');
+        if (autoRefresh && autoRefresh.checked) {
+            location.reload();
+        }
+    }, 60000);
+}
+</script>
+{% endblock %}

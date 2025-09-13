@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, redirect, url_for
 from flask_cors import CORS
 from flask_migrate import Migrate
 import os
@@ -7,6 +7,7 @@ from logging.handlers import RotatingFileHandler
 
 from models import db
 from api.v1 import api_v1
+from web import web
 
 def create_app():
     app = Flask(__name__)
@@ -21,6 +22,7 @@ def create_app():
     
     # Register blueprints
     app.register_blueprint(api_v1)
+    app.register_blueprint(web)
     
     # Setup logging
     setup_logging(app)
@@ -30,17 +32,28 @@ def create_app():
     def health_check():
         return jsonify({'status': 'healthy', 'service': 'message-hub'})
     
-    # Root endpoint
+    # Root endpoint - redirect to web interface
     @app.route('/')
     def index():
-        return jsonify({
-            'message': 'Message Hub Server',
-            'version': '1.0.0',
-            'endpoints': {
-                'health': '/health',
-                'api': '/api/v1'
-            }
-        })
+        # Check if request explicitly wants JSON (API clients)
+        accept_header = request.headers.get('Accept', '')
+        user_agent = request.headers.get('User-Agent', '')
+        
+        # Return JSON for API clients (curl, python requests, etc.)
+        if ('application/json' in accept_header and 'text/html' not in accept_header) or \
+           'curl' in user_agent.lower():
+            return jsonify({
+                'message': 'Message Hub Server',
+                'version': '1.0.0',
+                'endpoints': {
+                    'health': '/health',
+                    'web': '/',
+                    'api': '/api/v1'
+                }
+            })
+        else:
+            # Default to web interface (browsers)
+            return redirect(url_for('web.dashboard'))
     
     return app
 

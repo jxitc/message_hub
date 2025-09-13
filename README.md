@@ -1,6 +1,6 @@
 # Message Hub Server
 
-A centralized server for accepting forwarded messages from multiple devices and allowing clients to pull and read messages through a unified API.
+A centralized server for accepting forwarded messages from multiple devices and allowing clients to pull and read messages through a unified API and web interface.
 
 ## Quick Start
 
@@ -20,13 +20,21 @@ A centralized server for accepting forwarded messages from multiple devices and 
    pip install -r requirements.txt
    ```
 
-3. **Run the application**:
+3. **Initialize the database**:
+   ```bash
+   python init_db.py
+   ```
+
+4. **Run the application**:
    ```bash
    export FLASK_ENV=development
    python app.py
    ```
 
-The server will be available at http://localhost:5001
+The server will be available at:
+- **Web Interface**: http://localhost:5001 (opens dashboard in browser)  
+- **API Endpoints**: http://localhost:5001/api/v1/
+- **Health Check**: http://localhost:5001/health
 
 ### Testing the Server
 
@@ -136,6 +144,48 @@ python test_performance.py
 python test_cli.py
 ```
 
+## Web Interface
+
+The Message Hub includes a modern web interface that mirrors all CLI functionality:
+
+### Accessing the Web Interface
+
+1. **Start the server** (same command as for API):
+   ```bash
+   source venv/bin/activate
+   python app.py
+   ```
+
+2. **Open in browser**: http://localhost:5001
+
+### Web Interface Features
+
+- **Dashboard** (`/dashboard`): Message overview, statistics, and recent messages
+- **Messages** (`/messages`): List all messages with filtering and pagination  
+- **Message Details** (`/messages/<id>`): View complete message content and metadata
+- **Status** (`/status`): Server health monitoring and system statistics
+
+### Web Interface Capabilities
+
+The web interface provides the same functionality as the CLI:
+
+| CLI Command | Web Equivalent | Description |
+|-------------|----------------|-------------|
+| `./message-hub status` | `/status` | Server health and statistics |
+| `./message-hub messages --limit 10` | `/messages` | List messages with filtering |
+| `./message-hub messages --type SMS` | `/messages?type=SMS` | Filter by message type |
+| `./message-hub messages --unread` | `/messages?unread=on` | Show only unread messages |
+| `./message-hub mark-read <id>` | Click "Mark as Read" button | Mark messages as read |
+
+### Configuration
+
+The web interface uses the same server configuration:
+- **Default URL**: http://localhost:5001
+- **Port**: 5001 (same as API)
+- **Database**: Same SQLite database as CLI/API
+
+**Note**: The web interface runs on the **same server** as the API - no separate server needed.
+
 ## CLI Usage
 
 The Message Hub includes a command-line interface for easy access:
@@ -180,10 +230,18 @@ docker-compose up postgres  # Only PostgreSQL (not needed for SQLite)
 
 **Note:** The application currently uses SQLite instead of PostgreSQL for simpler development setup.
 
-## API Endpoints
+## Endpoints
 
+### Web Interface Routes
+- `GET /` - Redirects to dashboard (or JSON for API clients)
+- `GET /dashboard` - Web dashboard with message overview
+- `GET /messages` - Web interface for listing messages
+- `GET /messages/<id>` - Web interface for message details  
+- `GET /status` - Web interface for server status
+- `POST /messages/<id>/read` - Mark message as read (web)
+
+### API Endpoints
 - `GET /health` - Health check
-- `GET /` - Service information and available endpoints
 - `GET /api/v1/messages` - List messages with pagination and filtering
 - `POST /api/v1/messages` - Create/forward new message
 - `GET /api/v1/messages/:id` - Get single message by ID
@@ -200,9 +258,16 @@ message-hub/
 ├── app.py              # Flask application factory
 ├── config.py           # Configuration
 ├── api/                # API routes
-│   └── v1/            # API version 1
-├── models/            # Database models
+│   └── v1/            # API version 1 endpoints
+├── web/                # Web interface routes and views
+├── models/            # Database models (SQLAlchemy)
+├── templates/         # HTML templates (Jinja2)
+├── static/            # CSS, JavaScript, and static files
+├── cli/               # Command-line interface
+├── schemas/           # Data validation schemas
 ├── docs/              # Documentation
+├── init_db.py         # Database initialization
+├── test_*.py          # Test scripts
 └── requirements.txt   # Dependencies
 ```
 

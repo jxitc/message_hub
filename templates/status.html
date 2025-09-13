@@ -1,0 +1,423 @@
+{% extends "base.html" %}
+
+{% block title %}Status - Message Hub{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="display-6 mb-0">
+            <i class="bi bi-activity"></i> Server Status
+        </h1>
+        <p class="text-muted">System health and statistics</p>
+    </div>
+</div>
+
+<!-- Health Status -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        {% if status.healthy %}
+                            <i class="bi bi-check-circle-fill text-success fs-1"></i>
+                        {% else %}
+                            <i class="bi bi-x-circle-fill text-danger fs-1"></i>
+                        {% endif %}
+                    </div>
+                    <div>
+                        <h4 class="mb-1">
+                            {% if status.healthy %}
+                                System Healthy
+                            {% else %}
+                                System Issues Detected
+                            {% endif %}
+                        </h4>
+                        <p class="text-muted mb-0">Message Hub Server is 
+                            {% if status.healthy %}running normally{% else %}experiencing problems{% endif %}
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Statistics Row -->
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-bar-chart"></i> Message Statistics
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row text-center">
+                    <div class="col-12 mb-3">
+                        <h2 class="display-4 text-primary">{{ status.total_messages or 0 }}</h2>
+                        <p class="text-muted">Total Messages</p>
+                    </div>
+                </div>
+                
+                <div class="row">
+                    <div class="col-6 text-center">
+                        <h5>Latest Message</h5>
+                        {% if status.latest_timestamp %}
+                            <p class="small text-muted">
+                                {{ status.latest_timestamp.strftime('%Y-%m-%d') }}<br>
+                                {{ status.latest_timestamp.strftime('%H:%M:%S') }}
+                            </p>
+                        {% else %}
+                            <p class="small text-muted">No messages</p>
+                        {% endif %}
+                    </div>
+                    <div class="col-6 text-center">
+                        <h5>Server Uptime</h5>
+                        <p class="small text-muted" id="uptime">Loading...</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-3">
+        <div class="card h-100">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-pie-chart"></i> Message Types
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if status.type_stats %}
+                    {% for msg_type, count in status.type_stats.items() %}
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <div class="d-flex align-items-center">
+                            {% if msg_type == 'SMS' %}
+                                <i class="bi bi-chat-text text-primary me-2"></i>
+                            {% elif msg_type == 'PUSH_NOTIFICATION' %}
+                                <i class="bi bi-bell text-warning me-2"></i>
+                            {% elif msg_type == 'EMAIL' %}
+                                <i class="bi bi-envelope text-info me-2"></i>
+                            {% elif msg_type == 'CALL_LOG' %}
+                                <i class="bi bi-telephone text-success me-2"></i>
+                            {% else %}
+                                <i class="bi bi-question-circle text-secondary me-2"></i>
+                            {% endif %}
+                            <span>{{ msg_type.replace('_', ' ').title() }}</span>
+                        </div>
+                        <span class="badge bg-primary rounded-pill">{{ count }}</span>
+                    </div>
+                    {% endfor %}
+                {% else %}
+                    <div class="text-center text-muted py-3">
+                        <i class="bi bi-inbox fs-3 d-block mb-2"></i>
+                        <p>No messages received yet</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Device Statistics -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-phone"></i> Device Activity
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if status.device_stats %}
+                    <div class="row">
+                        {% for device, count in status.device_stats.items() %}
+                        <div class="col-md-4 mb-3">
+                            <div class="card">
+                                <div class="card-body text-center">
+                                    <i class="bi bi-device-ssd text-secondary fs-2 d-block mb-2"></i>
+                                    <h6 class="card-title">{{ device or 'Unknown Device' }}</h6>
+                                    <h4 class="text-primary">{{ count }}</h4>
+                                    <small class="text-muted">messages</small>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="text-center text-muted py-4">
+                        <i class="bi bi-phone fs-1 d-block mb-3"></i>
+                        <h5>No Devices Connected</h5>
+                        <p>Devices will appear here once they start forwarding messages.</p>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Activity Chart -->
+{% if status.activity_data %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-graph-up"></i> Message Activity (Last 7 Days)
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    {% for day in status.activity_data %}
+                    <div class="col text-center">
+                        <div class="mb-2">
+                            <div class="bg-primary rounded" 
+                                 style="height: {{ (day.count / (status.activity_data | map(attribute='count') | max | default(1))) * 100 }}px; min-height: 10px; width: 100%;"></div>
+                        </div>
+                        <small class="text-muted">{{ day.date[-5:] }}</small>
+                        <br>
+                        <strong>{{ day.count }}</strong>
+                    </div>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
+<!-- System Information -->
+<div class="row mb-4">
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="bi bi-server"></i> System Information
+                </h6>
+            </div>
+            <div class="card-body">
+                <dl class="row small">
+                    <dt class="col-sm-6">Version:</dt>
+                    <dd class="col-sm-6">1.0.0</dd>
+                    
+                    <dt class="col-sm-6">Database:</dt>
+                    <dd class="col-sm-6">SQLite</dd>
+                    
+                    <dt class="col-sm-6">API Status:</dt>
+                    <dd class="col-sm-6">
+                        <span class="badge bg-success">Active</span>
+                    </dd>
+                    
+                    <dt class="col-sm-6">Started:</dt>
+                    <dd class="col-sm-6" id="start-time">Loading...</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6 mb-3">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="bi bi-tools"></i> Quick Actions
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    <a href="{{ url_for('web.messages') }}" class="btn btn-primary btn-sm">
+                        <i class="bi bi-envelope"></i> View All Messages
+                    </a>
+                    <a href="{{ url_for('web.messages', unread='on') }}" class="btn btn-warning btn-sm">
+                        <i class="bi bi-envelope-exclamation"></i> View Unread Messages
+                    </a>
+                    <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
+                        <i class="bi bi-arrow-clockwise"></i> Refresh Status
+                    </button>
+                    <button class="btn btn-outline-info btn-sm" onclick="testConnection()">
+                        <i class="bi bi-wifi"></i> Test Connection
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Connection Test Results -->
+<div id="connection-test-results" class="row mb-4" style="display: none;">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="bi bi-wifi"></i> Connection Test Results
+                </h6>
+            </div>
+            <div class="card-body">
+                <div id="test-results-content">
+                    <!-- Test results will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Auto-refresh controls -->
+<div class="position-fixed bottom-0 end-0 p-3">
+    <div class="form-check form-switch">
+        <input class="form-check-input" type="checkbox" id="auto-refresh">
+        <label class="form-check-label small" for="auto-refresh">
+            Auto-refresh
+        </label>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// Status page specific JavaScript
+let startTime = new Date();
+
+document.addEventListener('DOMContentLoaded', function() {
+    initStatusPage();
+    updateUptime();
+    setInterval(updateUptime, 1000); // Update every second
+});
+
+function initStatusPage() {
+    // Set start time
+    document.getElementById('start-time').textContent = startTime.toLocaleString();
+    
+    // Auto-refresh functionality
+    const autoRefresh = document.getElementById('auto-refresh');
+    autoRefresh.addEventListener('change', function() {
+        if (this.checked) {
+            setInterval(function() {
+                location.reload();
+            }, 30000); // Refresh every 30 seconds
+            MessageHub.showToast('Auto-refresh enabled (30s)', 'success');
+        } else {
+            MessageHub.showToast('Auto-refresh disabled', 'info');
+        }
+    });
+}
+
+function updateUptime() {
+    const now = new Date();
+    const uptimeMs = now - startTime;
+    const uptimeText = formatUptime(uptimeMs);
+    
+    const uptimeElement = document.getElementById('uptime');
+    if (uptimeElement) {
+        uptimeElement.textContent = uptimeText;
+    }
+}
+
+function formatUptime(ms) {
+    const seconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(seconds / 60);
+    const hours = Math.floor(minutes / 60);
+    const days = Math.floor(hours / 24);
+    
+    if (days > 0) {
+        return `${days}d ${hours % 24}h ${minutes % 60}m`;
+    } else if (hours > 0) {
+        return `${hours}h ${minutes % 60}m`;
+    } else {
+        return `${minutes}m ${seconds % 60}s`;
+    }
+}
+
+async function testConnection() {
+    const resultsContainer = document.getElementById('connection-test-results');
+    const resultsContent = document.getElementById('test-results-content');
+    
+    // Show loading state
+    resultsContent.innerHTML = `
+        <div class="text-center">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Testing...</span>
+            </div>
+            <p class="mt-2">Testing server connection...</p>
+        </div>
+    `;
+    resultsContainer.style.display = 'block';
+    
+    const tests = [];
+    
+    try {
+        // Test health endpoint
+        const healthStart = Date.now();
+        const healthResponse = await fetch('/health');
+        const healthTime = Date.now() - healthStart;
+        
+        tests.push({
+            name: 'Health Endpoint',
+            status: healthResponse.ok,
+            time: healthTime,
+            details: healthResponse.ok ? `HTTP ${healthResponse.status}` : `Failed: ${healthResponse.status}`
+        });
+        
+        // Test sync status endpoint
+        const syncStart = Date.now();
+        const syncResponse = await fetch('/api/v1/sync/status');
+        const syncTime = Date.now() - syncStart;
+        
+        tests.push({
+            name: 'Sync Status Endpoint',
+            status: syncResponse.ok,
+            time: syncTime,
+            details: syncResponse.ok ? `HTTP ${syncResponse.status}` : `Failed: ${syncResponse.status}`
+        });
+        
+        // Test messages endpoint
+        const messagesStart = Date.now();
+        const messagesResponse = await fetch('/api/v1/messages?per_page=1');
+        const messagesTime = Date.now() - messagesStart;
+        
+        tests.push({
+            name: 'Messages Endpoint',
+            status: messagesResponse.ok,
+            time: messagesTime,
+            details: messagesResponse.ok ? `HTTP ${messagesResponse.status}` : `Failed: ${messagesResponse.status}`
+        });
+        
+    } catch (error) {
+        tests.push({
+            name: 'Connection Test',
+            status: false,
+            time: 0,
+            details: `Error: ${error.message}`
+        });
+    }
+    
+    // Display results
+    let resultsHtml = '';
+    tests.forEach(test => {
+        resultsHtml += `
+            <div class="d-flex justify-content-between align-items-center mb-2 p-2 rounded ${test.status ? 'bg-success bg-opacity-10' : 'bg-danger bg-opacity-10'}">
+                <div class="d-flex align-items-center">
+                    <i class="bi ${test.status ? 'bi-check-circle text-success' : 'bi-x-circle text-danger'} me-2"></i>
+                    <span>${test.name}</span>
+                </div>
+                <div class="text-end">
+                    <small class="text-muted">${test.time}ms</small><br>
+                    <small class="${test.status ? 'text-success' : 'text-danger'}">${test.details}</small>
+                </div>
+            </div>
+        `;
+    });
+    
+    resultsContent.innerHTML = resultsHtml;
+    
+    // Show summary message
+    const passed = tests.filter(t => t.status).length;
+    const total = tests.length;
+    
+    if (passed === total) {
+        MessageHub.showToast('All connection tests passed!', 'success');
+    } else {
+        MessageHub.showToast(`${passed}/${total} tests passed`, 'warning');
+    }
+}
+</script>
+{% endblock %}

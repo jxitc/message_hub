@@ -42,11 +42,11 @@
 - [x] **5.5** Add CLI configuration management (server URL, etc.)
 
 ### 6. Web Interface (MVP)
-- [ ] **6.1** Setup basic Flask templates and static files
-- [ ] **6.2** Create simple dashboard with message overview
-- [ ] **6.3** Implement basic message detail view
-- [ ] **6.4** Implement basic filtering UI (by type)
-- [ ] **6.5** Make interface mobile-friendly (responsive design)
+- [x] **6.1** Setup basic Flask templates and static files
+- [x] **6.2** Create simple dashboard with message overview
+- [x] **6.3** Implement basic message detail view
+- [x] **6.4** Implement basic filtering UI (by type)
+- [x] **6.5** Make interface mobile-friendly (responsive design)
 
 ### 7. MVP Testing & Validation
 - [ ] **7.1** Create unit tests for core endpoints

@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+
+{% block title %}Message Details - Message Hub{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-center">
+            <div>
+                <h1 class="display-6 mb-0">
+                    <i class="bi bi-envelope-open"></i> Message Details
+                </h1>
+                <p class="text-muted">Message ID: {{ message.id }}</p>
+            </div>
+            <div>
+                <a href="{{ url_for('web.messages') }}" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left"></i> Back to Messages
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-lg-8 mb-4">
+        <!-- Main Message Card -->
+        <div class="card message-card {{ 'unread' if not message.is_read else 'read' }}">
+            <div class="card-header">
+                <div class="d-flex align-items-center justify-content-between">
+                    <div class="d-flex align-items-center">
+                        <span class="status-indicator {{ 'status-unread' if not message.is_read else 'status-read' }} me-2"></span>
+                        
+                        <!-- Message Type Icon -->
+                        {% if message.type == 'SMS' %}
+                            <i class="bi bi-chat-text text-primary fs-4 me-2"></i>
+                        {% elif message.type == 'PUSH_NOTIFICATION' %}
+                            <i class="bi bi-bell text-warning fs-4 me-2"></i>
+                        {% elif message.type == 'EMAIL' %}
+                            <i class="bi bi-envelope text-info fs-4 me-2"></i>
+                        {% elif message.type == 'CALL_LOG' %}
+                            <i class="bi bi-telephone text-success fs-4 me-2"></i>
+                        {% else %}
+                            <i class="bi bi-question-circle text-secondary fs-4 me-2"></i>
+                        {% endif %}
+                        
+                        <div>
+                            <h5 class="mb-0">{{ message.sender or 'Unknown Sender' }}</h5>
+                            <small class="text-muted">
+                                <span class="badge bg-secondary">{{ message.type.replace('_', ' ').title() }}</span>
+                            </small>
+                        </div>
+                    </div>
+                    
+                    {% if not message.is_read %}
+                    <button class="btn btn-success btn-sm btn-mark-read" 
+                            data-message-id="{{ message.id }}">
+                        <i class="bi bi-check"></i> Mark as Read
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+            
+            <div class="card-body">
+                <!-- Message Content -->
+                <div class="message-content mb-4">
+                    <h6 class="text-muted mb-2">Message Content:</h6>
+                    <div class="p-3 bg-light rounded">
+                        <p class="mb-0">{{ message.content or 'No content' }}</p>
+                    </div>
+                </div>
+                
+                <!-- Metadata Section -->
+                {% if message.message_metadata %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">Metadata:</h6>
+                    <div class="p-3 bg-light rounded">
+                        <pre class="mb-0"><code>{{ message.message_metadata | tojson(indent=2) }}</code></pre>
+                    </div>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-lg-4">
+        <!-- Message Info Sidebar -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="bi bi-info-circle"></i> Message Information
+                </h6>
+            </div>
+            <div class="card-body">
+                <dl class="row">
+                    <dt class="col-sm-5">ID:</dt>
+                    <dd class="col-sm-7">
+                        <code class="small">{{ message.id }}</code>
+                    </dd>
+                    
+                    <dt class="col-sm-5">Type:</dt>
+                    <dd class="col-sm-7">
+                        <span class="badge bg-secondary">{{ message.type.replace('_', ' ').title() }}</span>
+                    </dd>
+                    
+                    <dt class="col-sm-5">Sender:</dt>
+                    <dd class="col-sm-7">{{ message.sender or 'Unknown' }}</dd>
+                    
+                    <dt class="col-sm-5">Device:</dt>
+                    <dd class="col-sm-7">
+                        <i class="bi bi-device-ssd"></i>
+                        {{ message.source_device_id or 'Unknown Device' }}
+                    </dd>
+                    
+                    <dt class="col-sm-5">Received:</dt>
+                    <dd class="col-sm-7">
+                        {% if message.timestamp %}
+                            <i class="bi bi-clock"></i>
+                            {{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
+                            <br><small class="text-muted">{{ message.timestamp.strftime('%A, %B %d, %Y') }}</small>
+                        {% else %}
+                            Unknown
+                        {% endif %}
+                    </dd>
+                    
+                    <dt class="col-sm-5">Status:</dt>
+                    <dd class="col-sm-7">
+                        {% if message.is_read %}
+                            <span class="badge bg-success">
+                                <i class="bi bi-check-circle"></i> Read
+                            </span>
+                        {% else %}
+                            <span class="badge bg-warning">
+                                <i class="bi bi-exclamation-circle"></i> Unread
+                            </span>
+                        {% endif %}
+                    </dd>
+                </dl>
+            </div>
+        </div>
+        
+        <!-- Actions Card -->
+        <div class="card">
+            <div class="card-header">
+                <h6 class="card-title mb-0">
+                    <i class="bi bi-gear"></i> Actions
+                </h6>
+            </div>
+            <div class="card-body">
+                <div class="d-grid gap-2">
+                    {% if not message.is_read %}
+                    <button class="btn btn-success btn-mark-read" 
+                            data-message-id="{{ message.id }}">
+                        <i class="bi bi-check"></i> Mark as Read
+                    </button>
+                    {% endif %}
+                    
+                    <button class="btn btn-outline-secondary" onclick="copyToClipboard('{{ message.id }}')">
+                        <i class="bi bi-clipboard"></i> Copy Message ID
+                    </button>
+                    
+                    <button class="btn btn-outline-info" onclick="copyToClipboard({{ message.content | tojson }})">
+                        <i class="bi bi-clipboard-data"></i> Copy Content
+                    </button>
+                    
+                    {% if message.message_metadata %}
+                    <button class="btn btn-outline-secondary" onclick="copyToClipboard({{ message.message_metadata | tojson }})">
+                        <i class="bi bi-clipboard-code"></i> Copy Metadata
+                    </button>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function copyToClipboard(text) {
+    navigator.clipboard.writeText(text).then(function() {
+        MessageHub.showToast('Copied to clipboard!', 'success');
+    }).catch(function(err) {
+        console.error('Failed to copy to clipboard:', err);
+        MessageHub.showToast('Failed to copy to clipboard', 'error');
+    });
+}
+</script>
+{% endblock %}
