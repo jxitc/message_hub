@@ -9,8 +9,8 @@
 - [x] Web UI 深色主题 + Messages 分页 Jinja `min()` bug 修复
 
 ### 待办
-- [ ] **API Key 鉴权**（重点：客户端手机端）——服务器端校验 `X-API-Key` 已完成并验证（无 key→401，带 key→200）；**安卓端**代码已加（AppPreferences.apiKey + OkHttp 拦截器），待装新 APK 到手机并设 `server_url=https://mh.jxitc.com` + `api_key`
-- [ ] 手机 `server_url` 切到 `https://mh.jxitc.com`，并 `ufw delete allow 5001/tcp` 收回公网 5001
+- [x] **API Key 鉴权**（重点：客户端手机端）——服务器 `/api/v1/*` 校验 `X-API-Key`（无 key→401、带 key→200、错 key→401、POST→201）；安卓端 `AppPreferences.apiKey` + OkHttp 拦截器自动带头；新 APK 已装手机并设 `server_url=https://mh.jxitc.com` + `api_key`；**E2E 通过**（simulate_sms → 远端 MH 库新增 `android-phone-1` SMS）
+- [x] 手机 `server_url` 切到 `https://mh.jxitc.com`，并 `ufw delete allow 5001/tcp` 收回公网 5001（只剩 22/80/443）
 - [ ] （可选）邮箱收集器 Gmail/QQ App Password 真实凭据
 - [ ] （可选）InfoAgent 导入真实库 / CHANGES_PLAN 同步回 info_agent 安卓端
 
