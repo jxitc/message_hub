@@ -1,73 +1,84 @@
-/* Message Hub Custom Styles */
+/* Message Hub Custom Styles — unified dark dashboard theme */
 
 :root {
     --primary-color: #0d6efd;
     --secondary-color: #6c757d;
-    --success-color: #198754;
-    --warning-color: #ffc107;
-    --danger-color: #dc3545;
-    --info-color: #0dcaf0;
-    --light-color: #f8f9fa;
+    --success-color: #22c55e;
+    --warning-color: #fbbf24;
+    --danger-color: #ef4444;
+    --info-color: #38bdf8;
+    --light-color: #f5f7fa;
     --dark-color: #212529;
+
+    --mh-bg: #0f1218;
+    --mh-surface: #171d29;
+    --mh-surface-2: #1c2331;
+    --mh-border: #242c3c;
+    --mh-text: #e7eaf0;
+    --mh-muted: #9aa3b2;
 }
 
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background-color: var(--light-color);
+    color: var(--mh-text);
+    background:
+        radial-gradient(1200px 620px at 18% -12%, rgba(59, 130, 246, 0.14), transparent 60%),
+        linear-gradient(180deg, #0f1218 0%, #0b0e14 100%);
+    background-attachment: fixed;
+    min-height: 100vh;
 }
 
-/* Navigation */
-.navbar-brand {
-    font-weight: 600;
+h1, h2, h3, h4, h5, h6 { color: #ffffff; }
+
+a { color: #7aa2ff; }
+a:hover { color: #a5c0ff; }
+
+/* Navigation: dark surface instead of a big bright-blue bar */
+.navbar.bg-primary {
+    background-color: #0c1017 !important;
+    border-bottom: 1px solid var(--mh-border);
+}
+.navbar-brand { font-weight: 600; color: #ffffff; }
+.navbar-brand i { color: #3b82f6; }
+.navbar .nav-link { color: #b7c0d0; }
+.navbar .nav-link:hover,
+.navbar .nav-link.active { color: #ffffff; }
+.navbar .badge.bg-success {
+    background-color: #22c55e !important;
+    color: #04150b !important;
 }
 
-/* Cards */
+/* Cards & surfaces */
 .card {
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-    border: 1px solid rgba(0, 0, 0, 0.125);
+    background-color: var(--mh-surface);
+    border: 1px solid var(--mh-border);
+    box-shadow: 0 0.25rem 0.75rem rgba(0, 0, 0, 0.25);
+    color: var(--mh-text);
 }
-
 .card-header {
-    background-color: rgba(0, 0, 0, 0.03);
-    border-bottom: 1px solid rgba(0, 0, 0, 0.125);
+    background-color: var(--mh-surface-2);
+    border-bottom: 1px solid var(--mh-border);
 }
+.card-subtitle.text-muted,
+.text-muted { color: var(--mh-muted) !important; }
+.card-title { color: #ffffff; }
 
-/* Message Cards */
-.message-card {
-    transition: all 0.3s ease;
-    cursor: pointer;
-}
-
+/* Message cards */
+.message-card { transition: all 0.3s ease; cursor: pointer; }
 .message-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
 }
-
 .message-card.unread {
     border-left: 4px solid var(--primary-color);
-    background-color: #fff;
+    background-color: var(--mh-surface);
 }
-
 .message-card.read {
-    background-color: #f8f9fa;
-    opacity: 0.9;
+    background-color: #12161f;
+    opacity: 0.92;
 }
-
-.message-type-badge {
-    font-size: 0.75rem;
-    font-weight: 500;
-}
-
-.message-meta {
-    font-size: 0.875rem;
-    color: var(--secondary-color);
-}
-
-.message-content {
-    line-height: 1.5;
-    word-wrap: break-word;
-}
-
+.message-meta { font-size: 0.875rem; color: var(--mh-muted); }
+.message-content { line-height: 1.5; word-wrap: break-word; }
 .message-content.truncated {
     display: -webkit-box;
     -webkit-line-clamp: 2;
@@ -76,125 +87,72 @@ body {
 }
 
 /* Status indicators */
-.status-indicator {
-    display: inline-block;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    margin-right: 8px;
-}
+.status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
+.status-read { background-color: var(--success-color); }
+.status-unread { background-color: var(--warning-color); }
 
-.status-read {
-    background-color: var(--success-color);
-}
-
-.status-unread {
-    background-color: var(--warning-color);
-}
-
-/* Stats Cards */
+/* Stats cards */
 .stat-card {
     background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
     color: white;
     border: none;
 }
-
-.stat-card .card-title {
-    font-size: 2rem;
-    font-weight: 700;
-}
+.stat-card .card-title { font-size: 2rem; font-weight: 700; }
 
 /* Filter form */
 .filter-form {
-    background-color: white;
+    background-color: var(--mh-surface);
+    border: 1px solid var(--mh-border);
     border-radius: 0.5rem;
-    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    color: var(--mh-text);
 }
+.form-control, .form-select {
+    background-color: var(--mh-surface-2);
+    border-color: var(--mh-border);
+    color: var(--mh-text);
+}
+.form-control:focus, .form-select:focus {
+    background-color: var(--mh-surface-2);
+    border-color: var(--primary-color);
+    color: var(--mh-text);
+}
+.form-control::placeholder { color: #6b7484; }
+.form-check-label { color: var(--mh-text); }
 
 /* Buttons */
-.btn-outline-primary:hover {
-    transform: translateY(-1px);
-}
-
-/* Loading states */
-.loading {
-    opacity: 0.6;
-    pointer-events: none;
-}
-
-.spinner-border-sm {
-    width: 1rem;
-    height: 1rem;
-}
-
-/* Responsive adjustments */
-@media (max-width: 768px) {
-    .container-fluid {
-        padding-left: 15px;
-        padding-right: 15px;
-    }
-    
-    .message-card .card-body {
-        padding: 1rem;
-    }
-    
-    .btn-group .btn {
-        padding: 0.375rem 0.5rem;
-        font-size: 0.875rem;
-    }
-}
+.btn-primary { background-color: #2563eb; border-color: #2563eb; }
+.btn-primary:hover { background-color: #1d4ed8; border-color: #1d4ed8; }
+.btn-outline-primary { color: #8ab1ff; border-color: #3b82f6; }
+.btn-outline-primary:hover { background-color: #3b82f6; color: #ffffff; }
+.btn-outline-success { color: #4ade80; border-color: #16a34a; }
+.btn-outline-success:hover { background-color: #16a34a; color: #ffffff; }
+.btn-outline-primary:hover { transform: translateY(-1px); }
 
 /* Pagination */
-.pagination .page-link {
-    color: var(--primary-color);
-}
+.pagination .page-link { background-color: var(--mh-surface-2); border-color: var(--mh-border); color: #cbd5e1; }
+.pagination .page-item.active .page-link { background-color: var(--primary-color); border-color: var(--primary-color); color: #ffffff; }
 
-.pagination .page-item.active .page-link {
-    background-color: var(--primary-color);
-    border-color: var(--primary-color);
-}
+/* Footer */
+footer.bg-light { background-color: #0c1017 !important; }
+footer .text-muted { color: var(--mh-muted) !important; }
 
-/* Toast notifications */
-.toast-container {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    z-index: 1055;
-}
+/* Toast */
+.toast-container { position: fixed; top: 20px; right: 20px; z-index: 1055; }
+.toast { background-color: var(--mh-surface-2); color: var(--mh-text); border: 1px solid var(--mh-border); }
 
 /* Utilities */
-.text-truncate-2 {
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
-    overflow: hidden;
-}
+.text-truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.border-start-primary { border-left: 4px solid var(--primary-color) !important; }
+.border-start-success { border-left: 4px solid var(--success-color) !important; }
+.border-start-warning { border-left: 4px solid var(--warning-color) !important; }
 
-.border-start-primary {
-    border-left: 4px solid var(--primary-color) !important;
-}
+/* Loading states */
+.loading { opacity: 0.6; pointer-events: none; }
+.spinner-border-sm { width: 1rem; height: 1rem; }
 
-.border-start-success {
-    border-left: 4px solid var(--success-color) !important;
-}
-
-.border-start-warning {
-    border-left: 4px solid var(--warning-color) !important;
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-    body {
-        background-color: var(--dark-color);
-        color: white;
-    }
-    
-    .card {
-        background-color: #2d2d2d;
-        border-color: #404040;
-    }
-    
-    .message-card.read {
-        background-color: #1a1a1a;
-    }
+/* Responsive */
+@media (max-width: 768px) {
+    .container-fluid { padding-left: 15px; padding-right: 15px; }
+    .message-card .card-body { padding: 1rem; }
+    .btn-group .btn { padding: 0.375rem 0.5rem; font-size: 0.875rem; }
 }

@@ -97,6 +97,9 @@ def messages():
         
         messages = pagination.items
         
+        # Last item index to show (clamp on the final page)
+        page_end = min(pagination.page * pagination.per_page, pagination.total)
+        
         # Get filter options
         message_types = db.session.query(Message.type).distinct().all()
         message_types = [t[0] for t in message_types if t[0]]
@@ -107,6 +110,7 @@ def messages():
         return render_template('messages.html',
                              messages=messages,
                              pagination=pagination,
+                             page_end=page_end,
                              message_types=message_types,
                              devices=devices,
                              current_filters={

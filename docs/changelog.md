@@ -5,11 +5,11 @@
 ## 2026-08-31 ~ 09-02（架构拆分：MH 收集层 + InfoAgent AI 层）
 
 ### 1. 接入安卓端（android_client/）
-- 从 info_agent 仓库**原样复制**安卓端项目到 `android_client/InfoAgent`（Kotlin + Jetpack Compose，监听短信/通知 → 本地 Room → 后台同步）。
+- 从 info_agent 仓库**原样复制**安卓端项目到 `android_client/MessageHub`（2026-09-03 由 InfoAgent 改名而来；Kotlin + Jetpack Compose，监听短信/通知 → 本地 Room → 后台同步）。
 - **网络层改造对接 MH**（`data/remote/` 下 3 个文件）：
   - `ApiModels.kt`：替换为 MH 模型（`MessageCreateRequest`：source_device_id/type/sender/content/timestamp/metadata；`MessageApiResponse`、`MessageListResponse` 对齐 MH 响应）
-  - `InfoAgentApiService.kt`：端点改 `POST api/v1/messages`、`GET api/v1/messages`（原 memories）
-  - `InfoAgentApiClient.kt`：本地 Memory → MH Message 映射（type：SMS→SMS、NOTIFICATION→PUSH_NOTIFICATION；sender 从 metadata 取；timestamp ISO8601）
+  - `MessageHubApiService.kt`（原 InfoAgentApiService）：端点改 `POST api/v1/messages`、`GET api/v1/messages`（原 memories）
+  - `MessageHubApiClient.kt`（原 InfoAgentApiClient）：本地 Memory → MH Message 映射（type：SMS→SMS、NOTIFICATION→PUSH_NOTIFICATION；sender 从 metadata 取；timestamp ISO8601）
   - 本地采集/存储/UI 逻辑保留不动；`MemorySyncService` 无需改
 - 构建：`./gradlew assembleDebug` ✅
 
@@ -39,3 +39,39 @@
                               ▼
                         InfoAgent(AI 处理 → memories)
 ```
+
+## 2026-09-03（真机联调 + 收尾）
+
+### 1. git
+- commit `e6cf49e`（94 文件，+7914 行：android_client + mail_collector + 接线 + 文档）已 push 到 `github.com:jxitc/message_hub` main
+
+### 2. 真机联调（USB adb，绕开无线 No route 环境限制）
+- MH 版 APK 已 `install -r` 装到手机（当时包名 `com.jxitc.infoagent`，lastUpdateTime 9/3 21:38；**9/3 改名后为 `com.jxitc.messagehub`，需卸载重装**），server_url 配为 `http://192.168.3.226:5001`（MH）
+- **手机 → MH 链路验证通过**：采集触发后文件日志显示 `Message created on MH server (HTTP 201)`；MH 库内 `android-phone-1` 累计 **1100+ 条** PUSH 通知（8/31~9/3 持续来自手机）
+- 注意：`simulate_*` debug 后门**绕过** `NotificationProcessor` 去重（直接调 use case），去重只对真实通知路径生效；验证去重需真实连续通知
+
+### 3. InfoAgent MH 导入器（跨仓，本仓依赖侧）
+- `info_agent/info_agent/mh_importer.py` + CLI `mh-import`：从 MH `/sync/messages?since=` 拉 → DeepSeek 处理 → memories（按 `mh_message_id` 幂等 + `mh_import_state` 水位）；实测 15 条、幂等验证 ✅；导入真实库未跑（需全权限）
+
+### 4. 当前环境 / 接续状态
+- 手机：USB `MV95UKDYGMFQKRQ8`，MH 版 app（server_url=MH 5001）
+- MH：`python app.py`（5001），**常需重启**；DB `instance/message_hub.db`（~1247 条）
+- InfoAgent：DeepSeek 驱动，`python -m info_agent.api`（0.0.0.0:8000），真实库需全权限
+- DSH：升级 `@deepseek-ai/dsh@0.1.2-rc.1`（pre-release）
+- 待办：真实连续通知验证去重、邮箱收集填真实凭据(Gmail/QQ App Password)、InfoAgent 导入真实库、CHANGES_PLAN 同步回 info_agent 安卓端(可选)
+
+## 2026-09-03（追加：安卓端改名 MessageHub + 新图标）
+
+- **安卓端全量改名 InfoAgent → MessageHub**：
+  - 工程目录 `android_client/InfoAgent` → `android_client/MessageHub`
+  - 包名 / applicationId `com.jxitc.infoagent` → `com.jxitc.messagehub`（namespace 同步）
+  - 类与文件：`MessageHubApplication` / `MessageHubApiClient` / `MessageHubApiService` / `MessageHubDatabase`（原 InfoAgent*）
+  - 资源/文案：app_name → `MessageHub`、主题 `Theme.MessageHub`（原 Theme.InfoAgent）、通知渠道 id、日志 TAG、`messagehub_prefs` / `messagehub_database`（原 info_agent_*）等
+  - **包名变化 ⇒ 手机旧 app 不再被覆盖，需卸载后重装**
+- **新图标（用户选定 C2「消息气泡」）**：蓝→藏青垂直渐变背景 + 白色圆角气泡（带小尾巴）+ 气泡内三色圆点（amber/green/cyan）；adaptive icon（anydpi-v26，vector background/foreground）+ 5 档密度 legacy PNG；512/1024 母版在 `android_client/MessageHub/art/`（对比用的 5 个候选在 `art/candidates/`）
+- 构建验证：`./gradlew :app:assembleDebug` ✅（BUILD SUCCESSFUL；APK `app/build/outputs/apk/debug/app-debug.apk`，badging 确认 `com.jxitc.messagehub` / label `MessageHub`；沙箱内用工程内 debug keystore 走 `ANDROID_DEBUG_KEYSTORE`，避免写 `~/.android`）
+- 外部 AI 层表述（info_agent 仓库 / InfoAgent server / mh_import 导入器等）保持原名未动；`android_client/docs/` 下旧版设计文档属历史遗留（描述旧 InfoAgent 全栈架构），未随改名重写
+- **手机装机 + 端到端验证（2026-09-03 22:20）**：adb 安装 `com.jxitc.messagehub`（旧包 `com.jxitc.infoagent` 已卸载）；run-as 预置 `messagehub_prefs.xml`（server_url=`http://192.168.3.226:5001`，进程内存缓存旧值需 force-stop 重启生效）；`enabled_notification_listeners` 已切到新包；`DebugCommand simulate_sms` + sync → MH 库新增 SMS（`android-phone-1`，内容含 `MH_RENAME_TEST_222013`）✅；注意 ColorOS 后台限制：DEBUG 广播需 app 前台才送达；新包需重授短信/通知权限（本次首启已授），自启动白名单如旧 app 开过需补
+- **远端部署（2026-09-03，DigitalOcean 188.166.172.192）**：systemd + gunicorn 托管 Flask（`0.0.0.0:5001`），SQLite（`/opt/message_hub/instance/message_hub.db`，纯空 schema），ufw 放行 22/5001；SSH 走专用密钥（本机 `.mh_deploy/`，不在 git）；一键脚本 `deploy/deploy.sh`（幂等：rsync→venv→pip→.env SECRET_KEY→create_all→systemd→ufw→health）；公网 `/health`、三个 Web 页面、API POST/GET 闭环均验证 ✅；文档 `docs/deploy.md`。注意：接口目前无认证，需尽快加 API Key（见 docs/deploy.md §9）
+
+

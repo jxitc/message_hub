@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- MessageHub launcher foreground: white chat bubble with tail + three colored dots
+     (same composition as the raster legacy icons). 108dp canvas, glyph centered. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- bubble body (white union): vertical band + horizontal band + 4 corner circles -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41,35L67,35L67,65L41,65Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,44L76,44L76,56L32,56Z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,44a9,9 0 1 0 18,0a9,9 0 1 0 -18,0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M58,44a9,9 0 1 0 18,0a9,9 0 1 0 -18,0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M32,56a9,9 0 1 0 18,0a9,9 0 1 0 -18,0z" />
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M58,56a9,9 0 1 0 18,0a9,9 0 1 0 -18,0z" />
+    <!-- bubble tail -->
+    <path
+        android:fillColor="#FFFFFFFF"
+        android:pathData="M41,65L53,65L45,74Z" />
+
+    <!-- three colored dots inside the bubble (amber / green / cyan) -->
+    <path
+        android:fillColor="#FFFBBF24"
+        android:pathData="M39.6,50a3.4,3.4 0 1 0 6.8,0a3.4,3.4 0 1 0 -6.8,0z" />
+    <path
+        android:fillColor="#FF4ADE80"
+        android:pathData="M50.6,50a3.4,3.4 0 1 0 6.8,0a3.4,3.4 0 1 0 -6.8,0z" />
+    <path
+        android:fillColor="#FF22D3EE"
+        android:pathData="M61.6,50a3.4,3.4 0 1 0 6.8,0a3.4,3.4 0 1 0 -6.8,0z" />
+</vector>
