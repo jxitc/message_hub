@@ -125,3 +125,18 @@ cd /opt/message_hub && venv/bin/python -c "import sqlite3;c=sqlite3.connect('ins
 - `deploy/deploy.sh`：部署脚本（本仓库内）。
 - `docs/deploy.md`：本文档。
 - 部署相关密钥/机密**均不在本仓库**（密钥在仓库外的 `~/.mh_deploy/`，`SECRET_KEY` 在服务器 `.env`）。
+
+## 11. 域名接入（mh.jxitc.com，可选）
+
+用子域名替代 IP，且可用**不带端口**的 `http://mh.jxitc.com/health`。
+
+- **DNS（Squarespace）**：给 `jxitc.com` 加一条 `A` 记录，Host=`mh`，Value=`188.166.172.192`。
+  生效验证：`dig +short mh.jxitc.com`（应返回 188.166.172.192）。
+- **服务器 nginx 反向代理**：`188.166.172.192` 上已装 nginx（或 `apt install -y nginx`），
+  新增 `/etc/nginx/sites-available/mh.jxitc.com.conf`（`server_name mh.jxitc.com;` `proxy_pass http://127.0.0.1:5001;`），
+  `ln -s` 进 `sites-enabled`，`nginx -t && systemctl reload nginx`。
+  - 注意：服务器原本就有 `ads-science.com` vhost（另一站点），新增的 `mh.jxitc.com.conf` 与之并存、互不影响。
+- **防火墙**：`ufw allow 'Nginx Full'`（80/443）；`5001/tcp` 目前仍放行（手机暂还指向 `:5001`），
+  **等手机切成 `http://mh.jxitc.com` 后**再 `ufw delete allow 5001/tcp` 收回内网，更安全。
+- **HTTPS（可选）**：DNS 生效后 `certbot --nginx -d mh.jxitc.com` 自动签证书并配 443 + 自动续期。
+- 验证：`curl http://mh.jxitc.com/health` → healthy；`curl http://mh.jxitc.com/` → Web UI。
