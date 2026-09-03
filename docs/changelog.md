@@ -76,4 +76,34 @@
 - **域名接入 + HTTPS（2026-09-03）**：Squarespace 加 `A` 记录 `mh -> 188.166.172.192`（`dig` 生效）；服务器 nginx 反代 `mh.jxitc.com -> 127.0.0.1:5001`（与原有 `ads-science.com` vhost 并存）；`certbot --nginx` 签 Let's Encrypt（到期 2026-12-02，`certbot.timer` 自动续期），`http` 301→`https`，`https://mh.jxitc.com/health`=healthy。注意：接口仍无认证，需尽快加 API Key
 - **API Key 鉴权（2026-09-03）**：服务器 `/api/v1/*` 加共享 `X-API-Key` 校验（`MH_API_KEY` 存服务器 `.env`；无 key→401、带对 key→200、错 key→401、POST→201 ✅）。安卓端 `AppPreferences.apiKey` + OkHttp 拦截器自动带头；`deploy.sh` 排除 `.env`（`--delete` 曾连带删掉服务器 `.env` 的坑已修）。**安卓端待装新 APK**（需手机 USB 重新连接）
 
+## 2026-09-03（今日收尾）
+
+今天这条线全部打通并完结：
+
+- **安卓端**：`InfoAgent → MessageHub` 改名 + 新图标（C2 气泡）；包名 `com.jxitc.messagehub`；已装手机并推送线上。
+- **Web UI**：统一深色主题；修复 Messages 分页 Jinja `min()` bug。
+- **部署**：DigitalOcean `188.166.172.192`，systemd + gunicorn + SQLite，`deploy/deploy.sh` 一键幂等部署。
+- **域名 + HTTPS**：`https://mh.jxitc.com`（Squarespace A 记录 + nginx 反代 + Let's Encrypt，http→https 301）。
+- **鉴权**：`/api/v1/*` 共享 `X-API-Key`；手机带 key 推送，E2E 通过（远端库新增 `android-phone-1` SMS，HTTP 201）。
+- **加固**：公网仅开放 `22/80/443`（`5001` 已收回内网）。
+
+**线上当前状态**
+| 项 | 值 |
+|---|---|
+| 入口 | `https://mh.jxitc.com`（Web UI）/ `/health` |
+| 服务器 | DO `188.166.172.192`，`/opt/message_hub`，systemd `message-hub.service` |
+| 手机 | `com.jxitc.messagehub` → `https://mh.jxitc.com`（带 `X-API-Key`） |
+| 开放端口 | 22, 80, 443 |
+| 机密 | SSH key 本机 `.mh_deploy/`；服务器 `.env`（`SECRET_KEY`+`MH_API_KEY`）；均不入库 |
+
+**运维速查**
+- 重部署：`./deploy/deploy.sh`（幂等）
+- 服务：`systemctl restart message-hub` / `journalctl -u message-hub -f`
+- 证书：`certbot.timer` 自动续期（到期 2026-12-02）
+
+**待办（可选，下一步再排）**
+- [ ] 邮箱收集器 Gmail/QQ App Password 真实凭据
+- [ ] InfoAgent 导入真实库 / CHANGES_PLAN 同步回 info_agent 安卓端
+- [ ] 接口进一步加固（如 Basic Auth 或用设备 `api_key` 做分设备鉴权）
+
 
