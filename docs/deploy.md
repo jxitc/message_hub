@@ -138,5 +138,6 @@ cd /opt/message_hub && venv/bin/python -c "import sqlite3;c=sqlite3.connect('ins
   - 注意：服务器原本就有 `ads-science.com` vhost（另一站点），新增的 `mh.jxitc.com.conf` 与之并存、互不影响。
 - **防火墙**：`ufw allow 'Nginx Full'`（80/443）；`5001/tcp` 目前仍放行（手机暂还指向 `:5001`），
   **等手机切成 `http://mh.jxitc.com` 后**再 `ufw delete allow 5001/tcp` 收回内网，更安全。
-- **HTTPS（可选）**：DNS 生效后 `certbot --nginx -d mh.jxitc.com` 自动签证书并配 443 + 自动续期。
+- **HTTPS（已启用 2026-09-03）**：`certbot --nginx -d mh.jxitc.com`（`--register-unsafely-without-email --redirect`）；
+  证书到期 `2026-12-02`，`certbot.timer` 自动续期；`http` 301 → `https`，`https://mh.jxitc.com/health` 返回 healthy。
 - 验证：`curl http://mh.jxitc.com/health` → healthy；`curl http://mh.jxitc.com/` → Web UI。
