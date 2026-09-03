@@ -14,6 +14,11 @@ class AppPreferences(context: Context) {
     var serverUrl: String
         get() = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
         set(value) = prefs.edit().putString(KEY_SERVER_URL, value).apply()
+
+    /** Shared API key sent as the X-API-Key header for Message Hub requests. */
+    var apiKey: String
+        get() = prefs.getString(KEY_API_KEY, "") ?: ""
+        set(value) = prefs.edit().putString(KEY_API_KEY, value).apply()
     
     var autoSync: Boolean
         get() = prefs.getBoolean(KEY_AUTO_SYNC, DEFAULT_AUTO_SYNC)
@@ -41,7 +46,7 @@ class AppPreferences(context: Context) {
     }
     
     fun isServerConfigured(): Boolean {
-        return serverUrl.isNotBlank() && serverUrl != DEFAULT_SERVER_URL
+        return serverUrl.isNotBlank() && serverUrl != DEFAULT_SERVER_URL && apiKey.isNotBlank()
     }
     
     fun resetToDefaults() {
@@ -54,6 +59,7 @@ class AppPreferences(context: Context) {
         
         // Keys
         private const val KEY_SERVER_URL = "server_url"
+        private const val KEY_API_KEY = "api_key"
         private const val KEY_AUTO_SYNC = "auto_sync"
         private const val KEY_SYNC_WIFI_ONLY = "sync_wifi_only"
         private const val KEY_BLOCKED_APPS = "blocked_apps"

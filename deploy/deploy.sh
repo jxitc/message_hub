@@ -61,6 +61,7 @@ rsync -az --delete \
     --exclude '.gradle' \
     --exclude 'app/build' \
     --exclude '.DS_Store' \
+    --exclude '.env' \
     --exclude 'deploy/secret' \
     "$PROJECT_ROOT/" "$SSH_USER@${SERVER}:${REMOTE_DIR}/"
 # NOTE: --delete only affects files tracked in this rsync (it won't touch the

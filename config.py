@@ -16,6 +16,10 @@ class Config:
     HOST = os.environ.get('HOST') or '0.0.0.0'
     PORT = int(os.environ.get('PORT') or 5000)
     
+    # Shared API key for /api/v1/* endpoints (set in server .env as MH_API_KEY).
+    # If unset the API runs WITHOUT auth (dev/test only) and logs a warning.
+    API_KEY = os.environ.get('MH_API_KEY')
+    
     # Message settings
     MAX_MESSAGE_LENGTH = int(os.environ.get('MAX_MESSAGE_LENGTH') or 10000)
     MAX_METADATA_SIZE = int(os.environ.get('MAX_METADATA_SIZE') or 5000)

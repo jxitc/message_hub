@@ -35,6 +35,15 @@ class MessageHubApiClient(
     
     private val okHttpClient = OkHttpClient.Builder()
         .addInterceptor(loggingInterceptor)
+        // Attach the shared API key to every request to MH /api/v1/* (header).
+        .addInterceptor { chain ->
+            val original = chain.request()
+            val key = preferences.apiKey
+            val request = if (key.isNotBlank()) {
+                original.newBuilder().header("X-API-Key", key).build()
+            } else original
+            chain.proceed(request)
+        }
         .connectTimeout(30, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)

@@ -1,5 +1,19 @@
 # Message Hub Server - Task Breakdown
 
+## 当前进度（2026-09-03）
+
+### 已交付
+- [x] 安卓端改名 InfoAgent → **MessageHub** + 新启动图标（C2 消息气泡）；包名 `com.jxitc.messagehub`
+- [x] 远端部署到 DigitalOcean `188.166.172.192`：systemd + gunicorn + SQLite，`deploy/deploy.sh` 一键幂等
+- [x] 域名 **mh.jxitc.com**：Squarespace `A` 记录 + nginx 反代 → `127.0.0.1:5001` + Let's Encrypt HTTPS（http→https 301）
+- [x] Web UI 深色主题 + Messages 分页 Jinja `min()` bug 修复
+
+### 待办
+- [ ] **API Key 鉴权**（重点：客户端手机端）——服务器端校验 `X-API-Key` 已完成并验证（无 key→401，带 key→200）；**安卓端**代码已加（AppPreferences.apiKey + OkHttp 拦截器），待装新 APK 到手机并设 `server_url=https://mh.jxitc.com` + `api_key`
+- [ ] 手机 `server_url` 切到 `https://mh.jxitc.com`，并 `ufw delete allow 5001/tcp` 收回公网 5001
+- [ ] （可选）邮箱收集器 Gmail/QQ App Password 真实凭据
+- [ ] （可选）InfoAgent 导入真实库 / CHANGES_PLAN 同步回 info_agent 安卓端
+
 ## Phase 1: MVP Core Implementation
 
 ### 1. Project Setup & Infrastructure
