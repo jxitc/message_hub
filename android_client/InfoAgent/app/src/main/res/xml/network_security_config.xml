@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- DEVELOPMENT ONLY: Allow all cleartext (HTTP) traffic for testing -->
+    <!-- WARNING: Remove this before production deployment -->
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
+</network-security-config>

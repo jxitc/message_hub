@@ -230,6 +230,29 @@ docker-compose up postgres  # Only PostgreSQL (not needed for SQLite)
 
 **Note:** The application currently uses SQLite instead of PostgreSQL for simpler development setup.
 
+## 邮箱收集（IMAP）
+
+`mail_collector.py` 是一个通用 IMAP 邮箱收集器：从任意 IMAP 邮箱（Gmail / QQ / Outlook / 163…）拉取未读邮件，解析成纯文本（无附件），POST 到 `POST /api/v1/messages`（`type=EMAIL`），让 Message Hub 做纯收集层，供 InfoAgent 等下游消费。
+
+```bash
+# 跑一轮（cron 用）
+python mail_collector.py --once
+
+# 常驻，每 300 秒一轮
+python mail_collector.py --watch 300
+
+# 演练：只拉取+解析，不 POST
+python mail_collector.py --once --dry-run
+```
+
+配置（环境变量）：`MAIL_ACCOUNTS`（JSON 数组，多邮箱）或 `MAIL_0_HOST/MAIL_0_USER/...`，
+`MH_URL`（默认 http://127.0.0.1:5001），`MAIL_STATE_DIR`（去重状态，默认 `~/.message_hub`）。
+在 `.env` 里配好 `MAIL_ACCOUNTS` 后启动 MH，服务器会自动起一个后台线程每
+`MAIL_COLLECTOR_INTERVAL` 秒（默认 300）收集一轮；也可完全交给 cron 跑 `--once`。
+
+> 邮箱需要"应用专用密码 / 授权码"而非登录密码（Gmail App Password、QQ 授权码、Outlook App Password）。
+> 完整说明、各家配置示例、常见问题见 **`docs/mail-collector.md`**。
+
 ## Endpoints
 
 ### Web Interface Routes
@@ -257,6 +280,7 @@ docker-compose up postgres  # Only PostgreSQL (not needed for SQLite)
 message-hub/
 ├── app.py              # Flask application factory
 ├── config.py           # Configuration
+├── mail_collector.py   # IMAP email collector (see docs/mail-collector.md)
 ├── api/                # API routes
 │   └── v1/            # API version 1 endpoints
 ├── web/                # Web interface routes and views
@@ -265,9 +289,9 @@ message-hub/
 ├── static/            # CSS, JavaScript, and static files
 ├── cli/               # Command-line interface
 ├── schemas/           # Data validation schemas
-├── docs/              # Documentation
+├── docs/              # Documentation (incl. mail-collector.md)
 ├── init_db.py         # Database initialization
-├── test_*.py          # Test scripts
+├── test_*.py          # Test scripts (incl. test_mail_collector.py)
 └── requirements.txt   # Dependencies
 ```
 

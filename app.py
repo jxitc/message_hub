@@ -3,6 +3,7 @@ from flask_cors import CORS
 from flask_migrate import Migrate
 import os
 import logging
+import threading
 from logging.handlers import RotatingFileHandler
 
 from models import db
@@ -26,6 +27,9 @@ def create_app():
     
     # Setup logging
     setup_logging(app)
+    
+    # Optional: start IMAP mail collector thread if MAIL_ACCOUNTS is configured
+    maybe_start_mail_collector(app)
     
     # Health check endpoint
     @app.route('/health')
@@ -56,6 +60,32 @@ def create_app():
             return redirect(url_for('web.dashboard'))
     
     return app
+
+def maybe_start_mail_collector(app):
+    """Start the optional IMAP mail collector thread (mail_collector.py).
+
+    Only starts when MAIL_ACCOUNTS is set in the environment/.env. The thread
+    runs a collect cycle every MAIL_COLLECTOR_INTERVAL seconds (default 300)
+    and is a daemon, so it dies with the server. If you prefer cron instead,
+    leave MAIL_ACCOUNTS unset here and run
+    ``python mail_collector.py --once`` on a schedule.
+    """
+    if not (os.environ.get('MAIL_ACCOUNTS') or '').strip():
+        return
+    try:
+        from mail_collector import run_collector_loop
+        interval = int(os.environ.get('MAIL_COLLECTOR_INTERVAL', '300'))
+    except Exception as exc:
+        app.logger.error('Mail collector NOT started: %s', exc)
+        return
+    thread = threading.Thread(
+        target=run_collector_loop,
+        kwargs={'interval': interval, 'logger': app.logger},
+        daemon=True,
+        name='mail-collector',
+    )
+    thread.start()
+    app.logger.info('Mail collector thread started (interval=%ss)', interval)
 
 def setup_logging(app):
     if not app.debug and not app.testing:
