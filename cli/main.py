@@ -18,6 +18,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 class Config:
     def __init__(self):
         self.server_url = DEFAULT_SERVER_URL
+        self.api_key = os.environ.get('MH_CLI_API_KEY') or None
         self.load_config()
     
     def load_config(self):
@@ -27,6 +28,9 @@ class Config:
                 with open(CONFIG_FILE, 'r') as f:
                     config_data = json.load(f)
                     self.server_url = config_data.get('server_url', DEFAULT_SERVER_URL)
+                    # config file api_key only applies if env did not provide one
+                    if not self.api_key:
+                        self.api_key = config_data.get('api_key') or None
             except (json.JSONDecodeError, IOError) as e:
                 click.echo(f"Warning: Could not load config: {e}", err=True)
     
@@ -36,7 +40,8 @@ class Config:
         try:
             with open(CONFIG_FILE, 'w') as f:
                 json.dump({
-                    'server_url': self.server_url
+                    'server_url': self.server_url,
+                    'api_key': self.api_key
                 }, f, indent=2)
         except IOError as e:
             click.echo(f"Warning: Could not save config: {e}", err=True)
@@ -44,17 +49,25 @@ class Config:
 # Global config instance
 config = Config()
 
+def _headers():
+    """Headers for MH API requests: attach X-API-Key when configured."""
+    headers = {'Accept': 'application/json'}
+    if config.api_key:
+        headers['X-API-Key'] = config.api_key
+    return headers
+
 def make_request(endpoint, method='GET', data=None, params=None):
     """Make HTTP request to the server"""
     url = f"{config.server_url}{endpoint}"
+    headers = _headers()
     
     try:
         if method == 'GET':
-            response = requests.get(url, params=params, timeout=10)
+            response = requests.get(url, params=params, headers=headers, timeout=10)
         elif method == 'POST':
-            response = requests.post(url, json=data, timeout=10)
+            response = requests.post(url, json=data, headers=headers, timeout=10)
         elif method == 'PUT':
-            response = requests.put(url, json=data, timeout=10)
+            response = requests.put(url, json=data, headers=headers, timeout=10)
         else:
             raise ValueError(f"Unsupported method: {method}")
         
@@ -110,11 +123,14 @@ def format_message(message, verbose=False):
 
 @click.group()
 @click.option('--server', '-s', help='Message Hub server URL')
+@click.option('--api-key', '-k', help='Message Hub API key (or set MH_CLI_API_KEY / config-set)')
 @click.version_option(version='1.0.0', prog_name='message-hub')
-def cli(server):
+def cli(server, api_key):
     """Message Hub CLI - Command line interface for the Message Hub Server"""
     if server:
         config.server_url = server
+    if api_key:
+        config.api_key = api_key
 
 @cli.command()
 @click.option('--limit', '-l', default=10, help='Number of messages to show')
@@ -274,16 +290,21 @@ def sync():
         for message in messages[-5:]:  # Show last 5
             format_message(message, verbose=False)
 
-@cli.command()
-@click.option('--server-url', prompt='Server URL', default=DEFAULT_SERVER_URL)
-def config_set(server_url):
-    """Configure CLI settings"""
+@cli.command('config-set')
+@click.option('--server-url', default=None, help='Message Hub server URL (default: keep current)')
+@click.option('--api-key', default=None, help='API key (default: keep current)')
+def config_set(server_url, api_key):
+    """Configure CLI settings (server URL and API key)"""
     
-    config.server_url = server_url
+    if server_url:
+        config.server_url = server_url
+    if api_key:
+        config.api_key = api_key
     config.save_config()
     
     click.echo(f"✅ Configuration saved:")
-    click.echo(f"   Server URL: {server_url}")
+    click.echo(f"   Server URL: {config.server_url}")
+    click.echo(f"   API key: {'<set>' if config.api_key else '(none)'}")
     click.echo(f"   Config file: {CONFIG_FILE}")
 
 @cli.command('config-show')
@@ -292,6 +313,7 @@ def config_show():
     
     click.echo("⚙️  Current Configuration:")
     click.echo(f"   Server URL: {config.server_url}")
+    click.echo(f"   API key: {'<set>' if config.api_key else '(none)'}")
     click.echo(f"   Config file: {CONFIG_FILE}")
     
     if CONFIG_FILE.exists():

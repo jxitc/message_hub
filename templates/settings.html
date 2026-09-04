@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - Message Hub{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="display-6 mb-0">
+            <i class="bi bi-gear"></i> Settings
+        </h1>
+        <p class="text-muted">API key management — keys are used by the phone app, CLI and API clients.</p>
+    </div>
+</div>
+
+<!-- API Keys Card -->
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-key"></i> API Keys
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if legacy_configured %}
+                <div class="alert alert-info py-2 small">
+                    <i class="bi bi-info-circle"></i>
+                    A legacy shared key (<code>MH_API_KEY</code>) is still configured in the server
+                    environment and remains accepted for backwards compatibility. Create per-device keys
+                    below and remove it from <code>.env</code> once every client has switched.
+                </div>
+                {% endif %}
+
+                {% if keys %}
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr>
+                                <th>Label</th>
+                                <th>Prefix</th>
+                                <th>Status</th>
+                                <th>Created</th>
+                                <th>Last used</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for k in keys %}
+                            <tr>
+                                <td>{{ k.name }}</td>
+                                <td><code>{{ k.prefix }}…</code></td>
+                                <td>
+                                    {% if k.is_active %}
+                                    <span class="badge bg-success">Active</span>
+                                    {% else %}
+                                    <span class="badge bg-secondary">Revoked</span>
+                                    {% endif %}
+                                </td>
+                                <td class="small text-muted">
+                                    <span data-utc="{{ k.created_at|utc_iso }}" data-fmt="datetime">{{ k.created_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                </td>
+                                <td class="small text-muted">
+                                    {% if k.last_used_at %}
+                                    <span data-utc="{{ k.last_used_at|utc_iso }}" data-fmt="datetime">{{ k.last_used_at.strftime('%Y-%m-%d %H:%M') }}</span>
+                                    {% else %}
+                                    never
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">
+                                    {% if k.is_active %}
+                                    <form method="POST" action="{{ url_for('web.revoke_api_key', key_id=k.id) }}"
+                                          onsubmit="return confirm('Revoke API key &quot;{{ k.name }}&quot;? Clients using it will stop working.');">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                                            <i class="bi bi-x-circle"></i> Revoke
+                                        </button>
+                                    </form>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">
+                    No API keys yet. Generate one below — it is required for all <code>/api/v1/*</code> requests.
+                </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-plus-circle"></i> Generate New Key
+                </h5>
+            </div>
+            <div class="card-body">
+                <form method="POST" action="{{ url_for('web.generate_api_key') }}">
+                    <div class="mb-3">
+                        <label for="key-name" class="form-label">Label</label>
+                        <input type="text" class="form-control" id="key-name" name="name"
+                               placeholder="e.g. phone-android, cli-laptop, mail-collector"
+                               maxlength="255" required>
+                        <div class="form-text">A short name to remember which client uses this key.</div>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-key"></i> Generate API Key
+                    </button>
+                </form>
+                <div class="alert alert-warning mt-3 mb-0 py-2 small">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    The full key is shown <strong>only once</strong> after generation — copy it immediately.
+                    Message Hub stores only a hash, so it cannot be recovered later.
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

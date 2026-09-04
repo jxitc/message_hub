@@ -285,3 +285,65 @@ def status():
     except Exception as e:
         flash(f'Error loading status: {str(e)}', 'error')
         return render_template('status.html', status={'healthy': False})
+
+
+# ---------------------------------------------------------------------------
+# Settings: API key management (page is protected by Cloudflare Access)
+# ---------------------------------------------------------------------------
+
+import hashlib
+import secrets as _secrets
+from models import ApiKey as ApiKeyModel
+
+KEY_PREFIX = 'mhk_'
+
+
+def _hash_key(key):
+    return hashlib.sha256(key.encode('utf-8')).hexdigest()
+
+
+@web.route('/settings')
+def settings():
+    """Settings page — lists API keys and lets the owner generate/revoke."""
+    keys = ApiKeyModel.query.order_by(ApiKeyModel.created_at.desc()).all()
+    from flask import current_app as _app
+    legacy_configured = bool((_app.config.get('API_KEY') or '').strip())
+    return render_template('settings.html', keys=keys,
+                           legacy_configured=legacy_configured)
+
+
+@web.route('/settings/api-keys/generate', methods=['POST'])
+def generate_api_key():
+    """Create a new API key. Plaintext is returned once and never again."""
+    name = (request.form.get('name') or '').strip()
+    if not name:
+        flash('Please provide a label for the key (e.g. "phone" or "cli")', 'error')
+        return redirect(url_for('web.settings'))
+    if len(name) > 255:
+        flash('Label too long (max 255 chars)', 'error')
+        return redirect(url_for('web.settings'))
+
+    secret = KEY_PREFIX + _secrets.token_urlsafe(32)
+    ak = ApiKeyModel(
+        name=name,
+        key_hash=_hash_key(secret),
+        prefix=secret[:12],
+        is_active=True,
+    )
+    db.session.add(ak)
+    db.session.commit()
+    # show the new key once (flash survives the redirect)
+    flash(f'Your new API key (shown once, store it safely): {secret}', 'success')
+    return redirect(url_for('web.settings'))
+
+
+@web.route('/settings/api-keys/<key_id>/revoke', methods=['POST'])
+def revoke_api_key(key_id):
+    ak = db.session.get(ApiKeyModel, key_id)
+    if not ak:
+        flash('API key not found', 'error')
+    else:
+        ak.is_active = False
+        db.session.commit()
+        flash(f'API key "{ak.name}" revoked', 'success')
+    return redirect(url_for('web.settings'))

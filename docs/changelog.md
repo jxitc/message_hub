@@ -122,4 +122,17 @@
 - 文档：README/CLAUDE.md 同步（mail_collector 的 IMAP UNSEEN 语义不受影响，保留）
 - 验证：迁移幂等（旧库删列保数据/新库 no-op）；API 响应无 is_read、PUT read→404；CLI 无状态符号、`mark-read` 报 No such command；test_api/sync/cli/mail_collector 全过
 
+## 2026-09-04（API Key 管理体系：网页生成 → 设备/CLI 独立配置）
+
+取代"单一共享 `MH_API_KEY`"的鉴权，改为**多把独立 key**（GitHub PAT 模式）：
+
+- **DB**：新增 `api_keys` 表（`models/api_key.py`）：name/prefix/key_hash(sha256，不存明文)/is_active/last_used_at；`db.create_all()` 自动建表，无需迁移
+- **中间件**（`api/v1/__init__.py`）：`require_api_key` 先查表（sha256 匹配 + active，成功后更新 last_used_at）；兼容回退 legacy `MH_API_KEY` env（平滑过渡，等各端换新 key 后从 `.env` 移除即可）；表与 env 均无 key 时仍进 dev 无认证模式并告警
+- **Web Settings 页**（`templates/settings.html` + 3 路由，受 Cloudflare Access 保护）：
+  - 列表：name/prefix/状态/创建时间/最后使用，可逐个 **Revoke**（软删）
+  - Generate：输入 label → 返回 `mhk_<随机>` 明文**仅一次**（flash 展示），DB 只存 hash
+  - 导航栏新增 Settings 入口
+- **CLI**：新增 `--api-key/-k` 全局参数；config 持久化（`config-set --api-key` / config.json / env `MH_CLI_API_KEY`）；`make_request` 自动带 `X-API-Key` —— **修复鉴权后 CLI 全部 401 的问题**（tasks.md 待办①完成）
+- 验证：生 key → 带 key API 200 / 无 key·错 key 401 / 吊销后 401 / 别把 key 误伤；DB 只存 hash；last_used_at 自动更新；CLI `--api-key` 与 config 持久化读消息通；test_api/sync/mail_collector 全过
+
 
