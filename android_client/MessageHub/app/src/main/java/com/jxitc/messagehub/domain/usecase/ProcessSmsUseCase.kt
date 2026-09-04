@@ -55,8 +55,10 @@ class ProcessSmsUseCase(
                 content = formattedContent,
                 sourceType = SourceType.SMS,
                 metadata = mapOf(
+                    "source" to "phone",
                     "phone_number" to phoneNumber,
                     "contact_name" to (contactName ?: ""),
+                    "message_id" to (smsMessage.messageId ?: ""),
                     "timestamp" to timestamp.toString()
                 )
             )
@@ -127,16 +129,8 @@ class ProcessSmsUseCase(
         }
     }
     
+    /** 干净的原始正文：不带任何 emoji/前缀/时间戳；结构化信息走 metadata。 */
     private fun formatSmsAsMemory(smsMessage: SmsMessage): String {
-        val timestamp = dateFormat.format(Date(smsMessage.timestamp))
-        val sender = smsMessage.contactName ?: smsMessage.phoneNumber
-        
-        return buildString {
-            appendLine("📱 SMS Message")
-            appendLine("From: $sender")
-            appendLine("Received: $timestamp")
-            appendLine()
-            appendLine(smsMessage.content)
-        }
+        return smsMessage.content.trim()
     }
 }

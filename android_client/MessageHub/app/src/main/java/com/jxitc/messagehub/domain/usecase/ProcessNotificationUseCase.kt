@@ -62,9 +62,11 @@ class ProcessNotificationUseCase(
                 content = formattedContent,
                 sourceType = SourceType.NOTIFICATION,
                 metadata = mapOf(
+                    "source" to "app",
                     "package_name" to packageName,
                     "app_name" to (appName ?: ""),
                     "notification_id" to notificationId.toString(),
+                    "title" to title,
                     "timestamp" to timestamp.toString()
                 )
             )
@@ -116,21 +118,14 @@ class ProcessNotificationUseCase(
         }
     }
 
+    /** 干净正文：优先 title 行 + 正文行；不带 emoji/标签/时间；结构化信息走 metadata。 */
     private fun formatNotificationAsMemory(notification: NotificationMessage): String {
-        val timestamp = dateFormat.format(Date(notification.timestamp))
-        val appDisplay = notification.appName ?: notification.packageName
-
-        return buildString {
-            appendLine("🔔 Notification")
-            appendLine("App: $appDisplay")
-            appendLine("Time: $timestamp")
-            appendLine()
-            if (notification.title.isNotBlank()) {
-                appendLine("Title: ${notification.title}")
-            }
-            if (notification.content.isNotBlank()) {
-                appendLine("Content: ${notification.content}")
-            }
+        val title = notification.title.trim()
+        val body = notification.content.trim()
+        return when {
+            title.isNotEmpty() && body.isNotEmpty() -> "$title\n$body"
+            title.isNotEmpty() -> title
+            else -> body
         }
     }
 }

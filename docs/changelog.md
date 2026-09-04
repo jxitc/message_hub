@@ -106,4 +106,16 @@
 - [ ] InfoAgent 导入真实库 / CHANGES_PLAN 同步回 info_agent 安卓端
 - [ ] 接口进一步加固（如 Basic Auth 或用设备 `api_key` 做分设备鉴权）
 
+## 2026-09-04（消息内容 schema 精简）
+
+- **问题**：安卓端采集时把「emoji🔔/📱 + 英文标签 + 时间戳」硬拼进 `content`（如 `🔔 Notification\nApp: 微信\nTime:...`），显示层又要剥一遍，冗余不正式。
+- **改法**：`content` 只存**原始正文**；结构化信息放 `type`/`sender`/`message_metadata`(JSON)。
+  - `ProcessSmsUseCase.formatSmsAsMemory` → 返回原始 `smsMessage.content`；metadata 加 `source=phone`、`message_id`
+  - `ProcessNotificationUseCase.formatNotificationAsMemory` → 返回 `title\nbody`（无正文用 title）；metadata 加 `source=app`、`title`
+- **验证**（手机 → 线上）：
+  - SMS：`content='CLEAN_SMS_194810'`（无 emoji/前缀）、`sender='+86139...'`、metadata 含 `source/phone_number/contact_name/message_id`
+  - 通知：`content='WeChat\nhello'`、`sender='微信'`、metadata 含 `source/app_name/package_name/notification_id/title`
+- 兼容：历史消息仍为旧格式不清理；新消息干净。服务器 schema 无需改（本就有 `message_metadata` JSON）。
+- ⚠️ adb 发含空格 body 会被截断（`--es` 引号陷阱），测试用无空格标记。
+
 
