@@ -43,6 +43,12 @@ This document breaks down the Android client development into concrete, independ
 - [ ] 1.2.4 Create network state monitoring
 - [x] 1.2.5 Implement retry logic with exponential backoff (for memory uploads)
 - [x] 1.2.6 Add request/response logging for debugging
+- [ ] 1.2.7 **P1 - NETWORK ERROR HANDLING / NO SILENT CRASH**: App crashed on launch (opened, showed cached messages, then closed itself ~1s later) when server was behind Cloudflare Access (all `/api/*` requests got 302 → login page HTML → Retrofit/Gson parse failure / unexpected exception chain). Must never crash on network anomalies. Scope (do with USB + `adb logcat` at home):
+  - Reproduce/confirm: get crash stack via `adb logcat` with server URL pointed at a blocked/redirecting endpoint
+  - Harden `MessageHubApiClient` (data/remote/): disable OkHttp follow-redirects (or detect 3xx), treat non-2xx + non-JSON body as a typed error, never throw uncaught out of the coroutine chain
+  - Audit all ViewModel/UseCase call sites: any exception escaping `viewModelScope`/`withContext(IO)` must be caught and surfaced as UI error, not crash
+  - Consider a global crash-safe policy: wrap sync triggers (auto-sync on launch in `MemoryListViewModel`) so network failure leaves local data usable
+  - Verify: block/redirect server → app opens, shows cached messages, stays alive, shows non-fatal error
 
 ### 1.3 Security & Encryption **[MOVED TO PHASE 7 - NOT NEEDED FOR MVP]**
 - [ ] MOVED: All security tasks moved to Section 11 (Security & Compliance)
@@ -393,6 +399,7 @@ Complete in order: 11.1 → 11.2 → 11.3 → 12.1 → 12.2 → 12.3 → 12.4
 - ~~**Sync Issue 1** (3.0.8): Old memories with failed uploads never retry after 5 attempts~~ **FIXED** ✅ - Now uses session-based retry (5 tries per sync session, fresh count on next sync)
 - ~~**Sync Issue 2** (3.0.9): No background periodic sync~~ **NOT APPLICABLE** - User prefers trigger-based sync (auto after SMS/notification capture, manual button)
 - ~~**Sync Issue 3** (3.0.10): Background auto-sync not working~~ **FIXED** ✅
+- **Network Issue 1** (1.2.7): **P1 - App crash on launch when server unreachable/redirecting** — reproduced 2026-09-04: server put behind Cloudflare Access, all API requests 302 → login HTML → app opened, showed cached messages, closed itself ~1s later. Mitigated by whitelisting API paths in Cloudflare; ROOT FIX pending (proper network error handling, see task 1.2.7). Verify with adb logcat.
 - **UI Issue 1** (2.1.6): SMS content preview limited to 3 lines in list view - cannot view full message
 - **UI Issue 2** (2.1.7): No detail screen to view full memory content - MemoryCard not clickable
 - **UX Issue** (2.2.6): No first-launch prompt for notification access - user must discover Settings manually
