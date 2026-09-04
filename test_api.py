@@ -101,18 +101,6 @@ def test_get_message(message_id):
     print(f"Response: {response.json()}")
     print()
 
-def test_mark_read(message_id):
-    """Test marking message as read"""
-    if not message_id:
-        print("⚠️  Skipping mark as read test (no message ID)")
-        return
-        
-    print("✅ Testing mark as read...")
-    response = requests.put(f"{BASE_URL}/api/v1/messages/{message_id}/read")
-    print(f"Status: {response.status_code}")
-    print(f"Response: {response.json()}")
-    print()
-
 def test_message_filtering():
     """Test message filtering"""
     print("🔎 Testing message filtering...")
@@ -166,7 +154,6 @@ def main():
         message_id = test_create_message()
         test_list_messages()
         test_get_message(message_id)
-        test_mark_read(message_id)
         test_message_filtering()
         
         print("✅ All tests completed successfully!")

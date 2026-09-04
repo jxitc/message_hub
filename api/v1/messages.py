@@ -100,24 +100,3 @@ def get_message(message_id):
     except Exception as e:
         current_app.logger.error(f"Error getting message {message_id}: {str(e)}")
         return jsonify({'error': 'Internal server error'}), 500
-
-@api_v1.route('/messages/<message_id>/read', methods=['PUT'])
-def mark_message_read(message_id):
-    try:
-        message = Message.query.get(message_id)
-        if not message:
-            return jsonify({'error': 'Message not found'}), 404
-            
-        message.is_read = True
-        message.updated_at = datetime.now(timezone.utc)
-        db.session.commit()
-        
-        return jsonify({
-            'message': f'Message {message_id} marked as read',
-            'data': message.to_dict()
-        })
-        
-    except Exception as e:
-        current_app.logger.error(f"Error marking message {message_id} as read: {str(e)}")
-        db.session.rollback()
-        return jsonify({'error': 'Internal server error'}), 500

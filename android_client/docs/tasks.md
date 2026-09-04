@@ -128,6 +128,7 @@ This document breaks down the Android client development into concrete, independ
 - [x] 3.4.8 Reuse MemorySyncService for automatic server upload (same logic as SMS)
 - [x] 3.4.9 Test notification collection with various apps (WhatsApp, Gmail, system notifications, etc.)
 - [ ] 3.4.10 Handle notification dismissal/interaction events (optional metadata) **[FUTURE ENHANCEMENT]**
+- [ ] 3.4.11 **Blocked-apps UX: toggle + management UI** — reported 2026-09-04. Long-press on an already-blocked app should toggle back to "重新启用通知" (unblock), not keep showing "禁止". Settings needs a list of blocked apps (`AppPreferences.blockedApps`) with per-app unblock. Add `removeBlockedApp()` to `AppPreferences` (data/local/AppPreferences.kt:39-45 currently add-only).
 
 ### 3.5 Notification Service Reliability ✅ **COMPLETED - BASIC MONITORING**
 - [x] 3.5.1 Implement auto-rebind logic in NotificationListener.onListenerDisconnected() for Android 7.0+
@@ -400,6 +401,10 @@ Complete in order: 11.1 → 11.2 → 11.3 → 12.1 → 12.2 → 12.3 → 12.4
 - ~~**Sync Issue 2** (3.0.9): No background periodic sync~~ **NOT APPLICABLE** - User prefers trigger-based sync (auto after SMS/notification capture, manual button)
 - ~~**Sync Issue 3** (3.0.10): Background auto-sync not working~~ **FIXED** ✅
 - **Network Issue 1** (1.2.7): **P1 - App crash on launch when server unreachable/redirecting** — reproduced 2026-09-04: server put behind Cloudflare Access, all API requests 302 → login HTML → app opened, showed cached messages, closed itself ~1s later. Mitigated by whitelisting API paths in Cloudflare; ROOT FIX pending (proper network error handling, see task 1.2.7). Verify with adb logcat.
+- **UI Issue 3** (2.4.x): **Blocked-apps list is add-only / not a toggle** — reported 2026-09-04:
+  1. Long-pressing an already-blocked app still shows "禁止此 app 的通知" and calls `addBlockedApp` again (no-op) — it should toggle: blocked → offer "重新启用通知" (remove from blacklist). Current code: `MainActivity`/`MemoryListScreen` long-press → `AppPreferences.addBlockedApp`; `AppPreferences` has only `addBlockedApp`/`isAppBlocked`, no `removeBlockedApp`.
+  2. Settings screen has no UI listing which apps are blocked, and no way to remove them — need a "Blocked apps" section in Settings that lists `AppPreferences.blockedApps` and lets the user unblock.
+  Fix scope: add `removeBlockedApp(pkg)` to `AppPreferences`; make long-press on a blocked app show an "unblock/enable" action (toggle); add a blocked-apps management list to Settings screen.
 - **UI Issue 1** (2.1.6): SMS content preview limited to 3 lines in list view - cannot view full message
 - **UI Issue 2** (2.1.7): No detail screen to view full memory content - MemoryCard not clickable
 - **UX Issue** (2.2.6): No first-launch prompt for notification access - user must discover Settings manually

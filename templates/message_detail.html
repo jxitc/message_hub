@@ -24,12 +24,10 @@
 <div class="row">
     <div class="col-lg-8 mb-4">
         <!-- Main Message Card -->
-        <div class="card message-card {{ 'unread' if not message.is_read else 'read' }}">
+        <div class="card message-card">
             <div class="card-header">
                 <div class="d-flex align-items-center justify-content-between">
                     <div class="d-flex align-items-center">
-                        <span class="status-indicator {{ 'status-unread' if not message.is_read else 'status-read' }} me-2"></span>
-                        
                         <!-- Message Type Icon -->
                         {% if message.type == 'SMS' %}
                             <i class="bi bi-chat-text text-primary fs-4 me-2"></i>
@@ -50,13 +48,6 @@
                             </small>
                         </div>
                     </div>
-                    
-                    {% if not message.is_read %}
-                    <button class="btn btn-success btn-sm btn-mark-read" 
-                            data-message-id="{{ message.id }}">
-                        <i class="bi bi-check"></i> Mark as Read
-                    </button>
-                    {% endif %}
                 </div>
             </div>
             
@@ -64,7 +55,7 @@
                 <!-- Message Content -->
                 <div class="message-content mb-4">
                     <h6 class="text-muted mb-2">Message Content:</h6>
-                    <div class="p-3 bg-light rounded">
+                    <div class="p-3 mh-panel">
                         <p class="mb-0">{{ message.content or 'No content' }}</p>
                     </div>
                 </div>
@@ -73,7 +64,7 @@
                 {% if message.message_metadata %}
                 <div class="mb-4">
                     <h6 class="text-muted mb-2">Metadata:</h6>
-                    <div class="p-3 bg-light rounded">
+                    <div class="p-3 mh-panel">
                         <pre class="mb-0"><code>{{ message.message_metadata | tojson(indent=2) }}</code></pre>
                     </div>
                 </div>
@@ -115,23 +106,10 @@
                     <dd class="col-sm-7">
                         {% if message.timestamp %}
                             <i class="bi bi-clock"></i>
-                            {{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}
-                            <br><small class="text-muted">{{ message.timestamp.strftime('%A, %B %d, %Y') }}</small>
+                            <span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="datetime">{{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                            <br><small class="text-muted"><span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="weekday">{{ message.timestamp.strftime('%A, %B %d, %Y') }}</span></small>
                         {% else %}
                             Unknown
-                        {% endif %}
-                    </dd>
-                    
-                    <dt class="col-sm-5">Status:</dt>
-                    <dd class="col-sm-7">
-                        {% if message.is_read %}
-                            <span class="badge bg-success">
-                                <i class="bi bi-check-circle"></i> Read
-                            </span>
-                        {% else %}
-                            <span class="badge bg-warning">
-                                <i class="bi bi-exclamation-circle"></i> Unread
-                            </span>
                         {% endif %}
                     </dd>
                 </dl>
@@ -147,13 +125,6 @@
             </div>
             <div class="card-body">
                 <div class="d-grid gap-2">
-                    {% if not message.is_read %}
-                    <button class="btn btn-success btn-mark-read" 
-                            data-message-id="{{ message.id }}">
-                        <i class="bi bi-check"></i> Mark as Read
-                    </button>
-                    {% endif %}
-                    
                     <button class="btn btn-outline-secondary" onclick="copyToClipboard('{{ message.id }}')">
                         <i class="bi bi-clipboard"></i> Copy Message ID
                     </button>

@@ -47,7 +47,7 @@
 
 <!-- Stats Cards Row -->
 <div class="row mb-4">
-    <div class="col-md-3 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card h-100 border-start-primary">
             <div class="card-body">
                 <div class="d-flex justify-content-between">
@@ -63,23 +63,7 @@
         </div>
     </div>
     
-    <div class="col-md-3 mb-3">
-        <div class="card h-100 border-start-warning">
-            <div class="card-body">
-                <div class="d-flex justify-content-between">
-                    <div>
-                        <h6 class="card-subtitle mb-2 text-muted">Unread</h6>
-                        <h2 class="card-title mb-0">{{ stats.unread_count or 0 }}</h2>
-                    </div>
-                    <div class="align-self-center">
-                        <i class="bi bi-envelope-exclamation text-warning fs-2"></i>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-    
-    <div class="col-md-3 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card h-100 border-start-success">
             <div class="card-body">
                 <div class="d-flex justify-content-between">
@@ -95,7 +79,7 @@
         </div>
     </div>
     
-    <div class="col-md-3 mb-3">
+    <div class="col-md-4 mb-3">
         <div class="card h-100 border-start-info">
             <div class="card-body">
                 <div class="d-flex justify-content-between">
@@ -103,7 +87,7 @@
                         <h6 class="card-subtitle mb-2 text-muted">Latest Message</h6>
                         <small class="card-text">
                             {% if stats.latest_timestamp %}
-                                {{ stats.latest_timestamp.strftime('%Y-%m-%d %H:%M') }}
+                                <span data-utc="{{ stats.latest_timestamp|utc_iso }}" data-fmt="minute">{{ stats.latest_timestamp.strftime('%Y-%m-%d %H:%M') }}</span>
                             {% else %}
                                 No messages
                             {% endif %}
@@ -210,11 +194,7 @@
             <div class="card-body p-0">
                 {% if recent_messages %}
                     {% for message in recent_messages %}
-                    <div class="d-flex align-items-center p-3 border-bottom message-preview 
-                                {{ 'border-start-warning' if not message.is_read else '' }}">
-                        <div class="me-3">
-                            <span class="status-indicator {{ 'status-unread' if not message.is_read else 'status-read' }}"></span>
-                        </div>
+                    <div class="d-flex align-items-center p-3 border-bottom message-preview">
                         <div class="me-3">
                             {% if message.type == 'SMS' %}
                                 <i class="bi bi-chat-text text-primary fs-5"></i>
@@ -232,7 +212,7 @@
                             <div class="d-flex justify-content-between align-items-start mb-1">
                                 <strong>{{ message.sender or 'Unknown Sender' }}</strong>
                                 <small class="text-muted">
-                                    {{ message.timestamp.strftime('%Y-%m-%d %H:%M') if message.timestamp else 'Unknown' }}
+                                    <span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="minute">{{ message.timestamp.strftime('%Y-%m-%d %H:%M') if message.timestamp else 'Unknown' }}</span>
                                 </small>
                             </div>
                             <p class="mb-1 text-truncate-2">{{ message.content or 'No content' }}</p>
@@ -245,14 +225,6 @@
                                class="btn btn-outline-primary btn-sm">
                                 <i class="bi bi-eye"></i>
                             </a>
-                            {% if not message.is_read %}
-                            <button class="btn btn-outline-success btn-sm ms-1 btn-mark-read" 
-                                    data-message-id="{{ message.id }}"
-                                    data-bs-toggle="tooltip" 
-                                    title="Mark as read">
-                                <i class="bi bi-check"></i>
-                            </button>
-                            {% endif %}
                         </div>
                     </div>
                     {% endfor %}

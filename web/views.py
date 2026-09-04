@@ -110,11 +110,6 @@ def dashboard():
         # Get total message count
         total_messages = db.session.query(func.count(Message.id)).scalar() or 0
         
-        # Get unread message count
-        unread_count = db.session.query(func.count(Message.id)).filter(
-            Message.is_read == False
-        ).scalar() or 0
-        
         # Get recent messages (last 24 hours)
         last_24h = datetime.now(timezone.utc) - timedelta(hours=24)
         recent_count = db.session.query(func.count(Message.id)).filter(
@@ -144,7 +139,6 @@ def dashboard():
         
         stats = {
             'total_messages': total_messages,
-            'unread_count': unread_count,
             'recent_count': recent_count,
             'latest_timestamp': latest_timestamp,
             'type_stats': {stat.type: stat.count for stat in type_stats},
@@ -168,7 +162,6 @@ def messages():
     per_page = int(request.args.get('limit', 20))
     message_type = request.args.get('type', '').strip()
     device = request.args.get('device', '').strip()
-    unread_only = request.args.get('unread') == 'on'
     
     try:
         # Build query
@@ -179,8 +172,6 @@ def messages():
             query = query.filter(Message.type == message_type)
         if device:
             query = query.filter(Message.source_device_id == device)
-        if unread_only:
-            query = query.filter(Message.is_read == False)
         
         # Order by timestamp (newest first)
         query = query.order_by(desc(Message.timestamp))
@@ -213,7 +204,6 @@ def messages():
                              current_filters={
                                  'type': message_type,
                                  'device': device,
-                                 'unread': unread_only,
                                  'limit': per_page
                              })
     
@@ -240,31 +230,6 @@ def message_detail(message_id):
     except Exception as e:
         flash(f'Error loading message: {str(e)}', 'error')
         return redirect(url_for('web.messages'))
-
-@web.route('/messages/<message_id>/read', methods=['POST'])
-def mark_read(message_id):
-    """Mark message as read - mirrors CLI mark-read command"""
-    try:
-        message = db.session.query(Message).filter(Message.id == message_id).first()
-        if not message:
-            return jsonify({'error': 'Message not found'}), 404
-        
-        message.is_read = True
-        db.session.commit()
-        
-        # Return JSON for AJAX requests, redirect for form submissions
-        if request.is_json or request.headers.get('Accept', '').startswith('application/json'):
-            return jsonify({'success': True, 'message': 'Message marked as read'})
-        else:
-            flash('Message marked as read', 'success')
-            return redirect(request.referrer or url_for('web.messages'))
-    
-    except Exception as e:
-        if request.is_json or request.headers.get('Accept', '').startswith('application/json'):
-            return jsonify({'error': str(e)}), 500
-        else:
-            flash(f'Error marking message as read: {str(e)}', 'error')
-            return redirect(request.referrer or url_for('web.messages'))
 
 @web.route('/status')
 def status():
@@ -320,8 +285,3 @@ def status():
     except Exception as e:
         flash(f'Error loading status: {str(e)}', 'error')
         return render_template('status.html', status={'healthy': False})
-
-@web.route('/api/messages/<message_id>/read', methods=['POST'])
-def api_mark_read(message_id):
-    """API endpoint for marking messages as read (for JavaScript)"""
-    return mark_read(message_id)

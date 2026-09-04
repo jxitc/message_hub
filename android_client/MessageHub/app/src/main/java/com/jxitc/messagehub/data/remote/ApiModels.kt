@@ -48,9 +48,7 @@ data class MessageApiData(
     @SerializedName("received_at")
     val receivedAt: String? = null,
     @SerializedName("metadata")
-    val metadata: Map<String, Any> = emptyMap(),
-    @SerializedName("is_read")
-    val isRead: Boolean = false
+    val metadata: Map<String, Any> = emptyMap()
 )
 
 /** Response of POST /api/v1/messages: {"message": "...", "id": "<uuid>", "data": {...}} */

@@ -106,4 +106,20 @@
 - [ ] InfoAgent 导入真实库 / CHANGES_PLAN 同步回 info_agent 安卓端
 - [ ] 接口进一步加固（如 Basic Auth 或用设备 `api_key` 做分设备鉴权）
 
+## 2026-09-04（Web 修复 + 移除 read/unread 概念）
+
+### 1. Web 显示修复（公网/时区/分页/配色）
+- **同源探活**：前端不再硬编码 `http://127.0.0.1:5001`（公网打开时 badge 误报 Disconnected；mark-read 也连错地址），改走同源相对路径；status 页连接测试不再直连需鉴权的 `/api/v1/*`
+- **时区**：时间一律存 UTC；模板输出带 `+00:00` 的 ISO（`utc_iso` 过滤器，补偿 SQLite 丢 tzinfo），JS `localizeTimestamps()` 按浏览器本地时区渲染（dashboard/messages/detail/status 全覆盖）
+- **分页**：Message 页翻页改真实 `<a href>`（保留筛选参数），移除 JS 双拦截导致的"下一页无反应"
+- **配色**：详情页内容/元数据块 `bg-light` → 暗色主题 `.mh-panel`（修复白底白字）
+
+### 2. 移除 read/unread 概念（用户决定：不需要"已读"语义）
+- DB：删 `messages.is_read` 列；新增幂等迁移脚本 `migrate.py`（deploy.sh 在 `create_all` 后自动跑；SQLite/PostgreSQL 通用，重复执行无害）
+- API：删 `PUT /api/v1/messages/<id>/read`；CLI 删 `mark-read`、`--unread`、`✓/○` 状态符号
+- Web/模板/JS：删 Unread 计数卡、unread 筛选、Mark as Read 按钮、状态徽章、`status-indicator` 样式；dashboard 统计卡 4→3（等宽）
+- 安卓端：`ApiModels.kt` 删 `isRead` 响应字段（Gson 缺省 false，无影响）
+- 文档：README/CLAUDE.md 同步（mail_collector 的 IMAP UNSEEN 语义不受影响，保留）
+- 验证：迁移幂等（旧库删列保数据/新库 no-op）；API 响应无 is_read、PUT read→404；CLI 无状态符号、`mark-read` 报 No such command；test_api/sync/cli/mail_collector 全过
+
 

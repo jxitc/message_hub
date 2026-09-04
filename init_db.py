@@ -59,7 +59,6 @@ def init_database():
             sender='team@company.com',
             content='Weekly team meeting scheduled for tomorrow at 2 PM',
             timestamp=datetime.now(timezone.utc),
-            is_read=True,
             message_metadata={
                 'subject': 'Weekly Team Meeting',
                 'category': 'work'

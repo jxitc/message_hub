@@ -104,6 +104,10 @@ with app.app_context():
 print("tables ok")
 PY
 
+# run idempotent schema migrations (drops stale columns e.g. messages.is_read)
+echo "==> running migrations"
+venv/bin/python migrate.py
+
 # systemd unit
 echo "==> writing systemd unit"
 cat > /etc/systemd/system/${APP_NAME}.service <<UNIT

@@ -54,7 +54,7 @@
                         </select>
                     </div>
                     
-                    <div class="col-md-2">
+                    <div class="col-md-3">
                         <label for="limit" class="form-label">Per Page</label>
                         <select name="limit" id="limit" class="form-select">
                             <option value="10" {% if current_filters.limit == 10 %}selected{% endif %}>10</option>
@@ -64,17 +64,7 @@
                         </select>
                     </div>
                     
-                    <div class="col-md-2">
-                        <div class="form-check mt-4">
-                            <input class="form-check-input" type="checkbox" name="unread" id="unread" 
-                                   {% if current_filters.unread %}checked{% endif %}>
-                            <label class="form-check-label" for="unread">
-                                Unread only
-                            </label>
-                        </div>
-                    </div>
-                    
-                    <div class="col-md-2">
+                    <div class="col-md-3">
                         <div class="d-flex gap-2 mt-4">
                             <button type="submit" class="btn btn-primary flex-fill">
                                 <i class="bi bi-search"></i>
@@ -116,13 +106,11 @@
             <div class="row">
                 {% for message in messages %}
                 <div class="col-12 mb-3">
-                    <div class="card message-card {{ 'unread' if not message.is_read else 'read' }}">
+                    <div class="card message-card">
                         <div class="card-body">
                             <div class="row align-items-center">
                                 <div class="col-md-8">
                                     <div class="d-flex align-items-center mb-2">
-                                        <span class="status-indicator {{ 'status-unread' if not message.is_read else 'status-read' }}"></span>
-                                        
                                         <!-- Message Type Icon -->
                                         <div class="me-3">
                                             {% if message.type == 'SMS' %}
@@ -158,7 +146,7 @@
                                     <div class="message-meta">
                                         <small class="text-muted">
                                             <i class="bi bi-clock"></i>
-                                            {{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else 'Unknown' }}
+                                            <span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="datetime">{{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else 'Unknown' }}</span>
                                             
                                             <span class="ms-3">
                                                 <i class="bi bi-device-ssd"></i>
@@ -181,15 +169,6 @@
                                            data-bs-toggle="tooltip" title="View Details">
                                             <i class="bi bi-eye"></i>
                                         </a>
-                                        
-                                        {% if not message.is_read %}
-                                        <button class="btn btn-outline-success btn-sm btn-mark-read" 
-                                                data-message-id="{{ message.id }}"
-                                                data-bs-toggle="tooltip" 
-                                                title="Mark as read">
-                                            <i class="bi bi-check"></i>
-                                        </button>
-                                        {% endif %}
                                     </div>
                                 </div>
                             </div>
@@ -205,7 +184,7 @@
                 <ul class="pagination justify-content-center">
                     {% if pagination.has_prev %}
                     <li class="page-item">
-                        <a class="page-link" href="#" data-page="{{ pagination.prev_num }}">
+                        <a class="page-link" href="{{ page_href(pagination.prev_num) }}">
                             <i class="bi bi-chevron-left"></i> Previous
                         </a>
                     </li>
@@ -215,7 +194,7 @@
                         {% if page_num %}
                             {% if page_num != pagination.page %}
                             <li class="page-item">
-                                <a class="page-link" href="#" data-page="{{ page_num }}">{{ page_num }}</a>
+                                <a class="page-link" href="{{ page_href(page_num) }}">{{ page_num }}</a>
                             </li>
                             {% else %}
                             <li class="page-item active">
@@ -231,7 +210,7 @@
                     
                     {% if pagination.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="#" data-page="{{ pagination.next_num }}">
+                        <a class="page-link" href="{{ page_href(pagination.next_num) }}">
                             Next <i class="bi bi-chevron-right"></i>
                         </a>
                     </li>
@@ -247,13 +226,13 @@
                     <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
                     <h5>No Messages Found</h5>
                     <p class="text-muted">
-                        {% if current_filters.type or current_filters.device or current_filters.unread %}
+                        {% if current_filters.type or current_filters.device %}
                             No messages match your current filters. Try adjusting your search criteria.
                         {% else %}
                             No messages have been received yet. Make sure your devices are configured to forward messages.
                         {% endif %}
                     </p>
-                    {% if current_filters.type or current_filters.device or current_filters.unread %}
+                    {% if current_filters.type or current_filters.device %}
                     <button type="button" class="btn btn-outline-primary" id="clear-filters">
                         <i class="bi bi-x-circle"></i> Clear Filters
                     </button>
@@ -278,6 +257,7 @@ function initMessagesPage() {
     window.loadMessages = function() {
         // Build current URL with filters
         const form = document.getElementById('filter-form');
+        if (!form) return;
         const formData = new FormData(form);
         const params = new URLSearchParams();
         
@@ -285,29 +265,18 @@ function initMessagesPage() {
             if (value) params.append(key, value);
         }
         
-        // Keep current page if exists
-        const currentPage = new URLSearchParams(window.location.search).get('page');
-        if (currentPage) params.append('page', currentPage);
-        
-        // Reload with current filters
+        // Reload with current filters (back to page 1)
         window.location.search = params.toString();
     };
     
     // Clear filters functionality
-    document.getElementById('clear-filters').addEventListener('click', function() {
-        window.location.href = window.location.pathname;
-    });
-    
-    // Pagination with AJAX-style behavior
-    document.querySelectorAll('.page-link[data-page]').forEach(function(link) {
-        link.addEventListener('click', function(e) {
-            e.preventDefault();
-            const page = this.dataset.page;
-            const params = new URLSearchParams(window.location.search);
-            params.set('page', page);
-            window.location.search = params.toString();
+    const clearBtn = document.getElementById('clear-filters');
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            window.location.href = window.location.pathname;
         });
-    });
+    }
+    // Note: pagination links are plain <a href> (see page_href) — no JS needed.
 }
 </script>
 {% endblock %}

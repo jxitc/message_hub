@@ -13,7 +13,6 @@ class Message(db.Model):
     timestamp = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
     received_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
     message_metadata = db.Column(db.JSON, default={})
-    is_read = db.Column(db.Boolean, default=False)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
     
@@ -26,6 +25,5 @@ class Message(db.Model):
             'content': self.content,
             'timestamp': self.timestamp.isoformat() if self.timestamp else None,
             'received_at': self.received_at.isoformat() if self.received_at else None,
-            'metadata': self.message_metadata or {},
-            'is_read': self.is_read
+            'metadata': self.message_metadata or {}
         }

@@ -69,14 +69,6 @@ a:hover { color: #a5c0ff; }
     transform: translateY(-2px);
     box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.35);
 }
-.message-card.unread {
-    border-left: 4px solid var(--primary-color);
-    background-color: var(--mh-surface);
-}
-.message-card.read {
-    background-color: #12161f;
-    opacity: 0.92;
-}
 .message-meta { font-size: 0.875rem; color: var(--mh-muted); }
 .message-content { line-height: 1.5; word-wrap: break-word; }
 .message-content.truncated {
@@ -86,10 +78,21 @@ a:hover { color: #a5c0ff; }
     overflow: hidden;
 }
 
-/* Status indicators */
-.status-indicator { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; }
-.status-read { background-color: var(--success-color); }
-.status-unread { background-color: var(--warning-color); }
+/* Content panel for message body / metadata (dark theme friendly) */
+.mh-panel {
+    background-color: var(--mh-surface-2);
+    border: 1px solid var(--mh-border);
+    border-radius: 0.5rem;
+    color: var(--mh-text);
+}
+.mh-panel pre {
+    color: #cfe0f5;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin-bottom: 0;
+}
+.mh-panel code { color: inherit; }
 
 /* Stats cards */
 .stat-card {

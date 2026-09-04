@@ -65,8 +65,8 @@
                         <h5>Latest Message</h5>
                         {% if status.latest_timestamp %}
                             <p class="small text-muted">
-                                {{ status.latest_timestamp.strftime('%Y-%m-%d') }}<br>
-                                {{ status.latest_timestamp.strftime('%H:%M:%S') }}
+                                <span data-utc="{{ status.latest_timestamp|utc_iso }}" data-fmt="date">{{ status.latest_timestamp.strftime('%Y-%m-%d') }}</span><br>
+                                <span data-utc="{{ status.latest_timestamp|utc_iso }}" data-fmt="time">{{ status.latest_timestamp.strftime('%H:%M:%S') }}</span>
                             </p>
                         {% else %}
                             <p class="small text-muted">No messages</p>
@@ -227,9 +227,6 @@
                 <div class="d-grid gap-2">
                     <a href="{{ url_for('web.messages') }}" class="btn btn-primary btn-sm">
                         <i class="bi bi-envelope"></i> View All Messages
-                    </a>
-                    <a href="{{ url_for('web.messages', unread='on') }}" class="btn btn-warning btn-sm">
-                        <i class="bi bi-envelope-exclamation"></i> View Unread Messages
                     </a>
                     <button class="btn btn-outline-secondary btn-sm" onclick="location.reload()">
                         <i class="bi bi-arrow-clockwise"></i> Refresh Status

@@ -65,7 +65,6 @@ python test_api.py
 Runs comprehensive tests of all API endpoints including:
 - Device registration and listing
 - Message creation, retrieval, and filtering
-- Marking messages as read
 - Pagination testing
 
 **Note:** Test data is NOT deleted - it remains in the database for inspection.
@@ -110,11 +109,6 @@ curl http://127.0.0.1:5001/api/v1/messages?device=my-phone
 
 # Pagination
 curl http://127.0.0.1:5001/api/v1/messages?page=1&per_page=10
-```
-
-**Mark Message as Read:**
-```bash
-curl -X PUT http://127.0.0.1:5001/api/v1/messages/{message_id}/read
 ```
 
 **Delta Sync (Efficient Synchronization):**
@@ -174,8 +168,6 @@ The web interface provides the same functionality as the CLI:
 | `./message-hub status` | `/status` | Server health and statistics |
 | `./message-hub messages --limit 10` | `/messages` | List messages with filtering |
 | `./message-hub messages --type SMS` | `/messages?type=SMS` | Filter by message type |
-| `./message-hub messages --unread` | `/messages?unread=on` | Show only unread messages |
-| `./message-hub mark-read <id>` | Click "Mark as Read" button | Mark messages as read |
 
 ### Configuration
 
@@ -209,10 +201,6 @@ chmod +x message-hub
 # List messages with filters
 ./message-hub messages --type SMS --limit 5
 ./message-hub messages --device android-phone-1 --verbose
-./message-hub messages --unread
-
-# Mark message as read
-./message-hub mark-read <message-id>
 
 # Perform delta sync
 ./message-hub sync
@@ -261,14 +249,12 @@ python mail_collector.py --once --dry-run
 - `GET /messages` - Web interface for listing messages
 - `GET /messages/<id>` - Web interface for message details  
 - `GET /status` - Web interface for server status
-- `POST /messages/<id>/read` - Mark message as read (web)
 
 ### API Endpoints
 - `GET /health` - Health check
 - `GET /api/v1/messages` - List messages with pagination and filtering
 - `POST /api/v1/messages` - Create/forward new message
 - `GET /api/v1/messages/:id` - Get single message by ID
-- `PUT /api/v1/messages/:id/read` - Mark message as read
 - `GET /api/v1/devices` - List registered devices
 - `POST /api/v1/devices/register` - Register new device with API key
 - `GET /api/v1/sync/messages` - Delta sync messages with timestamp-based filtering

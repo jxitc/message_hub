@@ -46,7 +46,6 @@ python-dotenv==1.0.0
 ### Core Endpoints
 - `POST /api/v1/messages` - Forward new messages
 - `GET /api/v1/messages` - Retrieve messages with delta sync
-- `PUT /api/v1/messages/:id/read` - Mark messages as read
 - `POST /api/v1/devices/register` - Device registration
 - `GET /api/v1/sync/messages?since=timestamp` - Delta sync endpoint
 
@@ -69,9 +68,6 @@ message-hub messages --limit 10
 
 # Filter by device or type
 message-hub messages --device android-phone-1 --type SMS
-
-# Mark messages as read
-message-hub mark-read --message-id uuid
 
 # Device management
 message-hub devices list

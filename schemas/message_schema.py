@@ -17,7 +17,6 @@ class MessageResponseSchema(Schema):
     timestamp = fields.DateTime()
     received_at = fields.DateTime()
     metadata = fields.Dict()
-    is_read = fields.Bool()
 
 class MessageListSchema(Schema):
     messages = fields.List(fields.Nested(MessageResponseSchema))

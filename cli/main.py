@@ -92,24 +92,21 @@ def format_message(message, verbose=False):
     sender = message.get('sender', 'Unknown')
     content = message.get('content', '')
     timestamp = format_timestamp(message.get('timestamp'))
-    is_read = message.get('is_read', False)
     device = message.get('source_device', 'Unknown')
     
     # Truncate content for non-verbose mode
     if not verbose and len(content) > 50:
         content = content[:47] + "..."
     
-    read_status = "✓" if is_read else "○"
-    
     if verbose:
-        click.echo(f"{read_status} [{msg_id}] {msg_type}")
+        click.echo(f"[{msg_id}] {msg_type}")
         click.echo(f"   From: {sender}")
         click.echo(f"   Device: {device}")
         click.echo(f"   Time: {timestamp}")
         click.echo(f"   Content: {content}")
         click.echo()
     else:
-        click.echo(f"{read_status} [{msg_id}] {msg_type:15} {sender:20} {content}")
+        click.echo(f"[{msg_id}] {msg_type:15} {sender:20} {content}")
 
 @click.group()
 @click.option('--server', '-s', help='Message Hub server URL')
@@ -123,9 +120,8 @@ def cli(server):
 @click.option('--limit', '-l', default=10, help='Number of messages to show')
 @click.option('--type', '-t', help='Filter by message type (SMS, PUSH_NOTIFICATION, EMAIL, CALL_LOG)')
 @click.option('--device', '-d', help='Filter by source device')
-@click.option('--unread', is_flag=True, help='Show only unread messages')
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed message information')
-def messages(limit, type, device, unread, verbose):
+def messages(limit, type, device, verbose):
     """List messages from the hub"""
     
     # Build query parameters
@@ -160,41 +156,18 @@ def messages(limit, type, device, unread, verbose):
         click.echo("📭 No messages found")
         return
     
-    # Filter unread if requested
-    if unread:
-        messages = [msg for msg in messages if not msg.get('is_read', False)]
-        if not messages:
-            click.echo("📭 No unread messages found")
-            return
-    
     # Display header
     if verbose:
         click.echo(f"📬 Found {len(messages)} messages (total: {total})")
         click.echo("=" * 60)
     else:
         click.echo(f"📬 Messages (showing {len(messages)} of {total}):")
-        click.echo(f"{'Status':<2} {'ID':<10} {'Type':<15} {'Sender':<20} {'Content'}")
+        click.echo(f"{'ID':<10} {'Type':<15} {'Sender':<20} {'Content'}")
         click.echo("-" * 80)
     
     # Display messages
     for message in messages:
         format_message(message, verbose)
-
-@cli.command('mark-read')
-@click.argument('message_id')
-def mark_read(message_id):
-    """Mark a message as read"""
-    
-    response = make_request(f'/api/v1/messages/{message_id}/read', method='PUT')
-    if not response:
-        return
-    
-    if response.status_code == 200:
-        click.echo(f"✅ Message {message_id[:8]} marked as read")
-    elif response.status_code == 404:
-        click.echo(f"❌ Message {message_id} not found", err=True)
-    else:
-        click.echo(f"❌ Error: {response.status_code} - {response.text}", err=True)
 
 @cli.command()
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed error information')

@@ -14,7 +14,6 @@ const config = {
 let currentFilters = {
     type: '',
     device: '',
-    unread: false,
     limit: 20,
     page: 1
 };
@@ -22,7 +21,43 @@ let currentFilters = {
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', function() {
     initializeApp();
+    localizeTimestamps();
 });
+
+/**
+ * Localize every element marked with data-utc (an explicit UTC ISO string).
+ * Times are stored/served in UTC; each viewer sees them in their own
+ * timezone. Falls back to the raw UTC text if parsing fails.
+ */
+function localizeTimestamps() {
+    const pad = function(n) { return String(n).padStart(2, '0'); };
+    document.querySelectorAll('[data-utc]').forEach(function(el) {
+        const raw = el.getAttribute('data-utc');
+        if (!raw) return;
+        const d = new Date(raw);
+        if (isNaN(d.getTime())) return; // keep original text
+        const fmt = el.getAttribute('data-fmt') || 'datetime';
+        let text;
+        const weekdays = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const months = ['January', 'February', 'March', 'April', 'May', 'June',
+                        'July', 'August', 'September', 'October', 'November', 'December'];
+        if (fmt === 'date') {
+            text = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+        } else if (fmt === 'time') {
+            text = pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        } else if (fmt === 'minute') {
+            text = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+                   ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes());
+        } else if (fmt === 'weekday') {
+            text = weekdays[d.getDay()] + ', ' + months[d.getMonth()] + ' ' +
+                   d.getDate() + ', ' + d.getFullYear();
+        } else { // datetime
+            text = d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) +
+                   ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+        }
+        el.textContent = text;
+    });
+}
 
 function initializeApp() {
     // Load configuration from localStorage (mirrors CLI config)
@@ -82,15 +117,6 @@ async function checkServerStatus() {
 }
 
 function setupEventListeners() {
-    // Mark as read buttons
-    document.addEventListener('click', function(e) {
-        if (e.target.matches('.btn-mark-read')) {
-            e.preventDefault();
-            const messageId = e.target.dataset.messageId;
-            markMessageAsRead(messageId, e.target);
-        }
-    });
-    
     // Filter form submission
     const filterForm = document.getElementById('filter-form');
     if (filterForm) {
@@ -105,15 +131,6 @@ function setupEventListeners() {
     if (clearFiltersBtn) {
         clearFiltersBtn.addEventListener('click', clearFilters);
     }
-    
-    // Pagination links
-    document.addEventListener('click', function(e) {
-        if (e.target.matches('.page-link[data-page]')) {
-            e.preventDefault();
-            const page = parseInt(e.target.dataset.page);
-            loadPage(page);
-        }
-    });
     
     // Auto-refresh toggle
     const autoRefreshToggle = document.getElementById('auto-refresh');
@@ -130,52 +147,6 @@ function initializeTooltips() {
     });
 }
 
-async function markMessageAsRead(messageId, buttonElement) {
-    const originalText = buttonElement.innerHTML;
-    buttonElement.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span>';
-    buttonElement.disabled = true;
-    
-    try {
-        // Use the web route (same-origin POST) instead of the /api/v1 endpoint:
-        // the API requires an X-API-Key header that must not be shipped to the
-        // browser, and the web route returns JSON when we ask for it.
-        const response = await fetch(`/messages/${messageId}/read`, {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json'
-            }
-        });
-        
-        if (response.ok) {
-            // Update UI
-            const messageCard = buttonElement.closest('.message-card');
-            if (messageCard) {
-                messageCard.classList.remove('unread');
-                messageCard.classList.add('read');
-                
-                // Update status indicator
-                const statusIndicator = messageCard.querySelector('.status-indicator');
-                if (statusIndicator) {
-                    statusIndicator.classList.remove('status-unread');
-                    statusIndicator.classList.add('status-read');
-                }
-                
-                // Hide mark as read button
-                buttonElement.style.display = 'none';
-            }
-            
-            showToast('Message marked as read', 'success');
-        } else {
-            throw new Error(`HTTP ${response.status}`);
-        }
-    } catch (error) {
-        console.error('Failed to mark message as read:', error);
-        showToast('Failed to mark message as read', 'error');
-        buttonElement.innerHTML = originalText;
-        buttonElement.disabled = false;
-    }
-}
-
 function applyFilters() {
     const form = document.getElementById('filter-form');
     if (!form) return;
@@ -184,7 +155,6 @@ function applyFilters() {
     currentFilters = {
         type: formData.get('type') || '',
         device: formData.get('device') || '',
-        unread: formData.has('unread'),
         limit: parseInt(formData.get('limit')) || 20,
         page: 1
     };
@@ -212,23 +182,10 @@ function clearFilters() {
         currentFilters = {
             type: '',
             device: '',
-            unread: false,
             limit: 20,
             page: 1
         };
         applyFilters();
-    }
-}
-
-function loadPage(page) {
-    currentFilters.page = page;
-    if (typeof loadMessages === 'function') {
-        loadMessages();
-    } else {
-        // Reload with new page parameter
-        const params = new URLSearchParams(window.location.search);
-        params.set('page', page);
-        window.location.search = params.toString();
     }
 }
 
@@ -319,7 +276,6 @@ function toggleAutoRefresh() {
 // Export for use in other files
 window.MessageHub = {
     config,
-    markMessageAsRead,
     showToast,
     formatTimestamp,
     formatMessageType,
