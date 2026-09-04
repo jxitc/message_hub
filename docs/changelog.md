@@ -118,5 +118,7 @@
 - 兼容：历史消息仍为旧格式不清理；新消息干净。服务器 schema 无需改（本就有 `message_metadata` JSON）。
 - ⚠️ adb 发含空格 body 会被截断（`--es` 引号陷阱），测试用无空格标记。
 - **收尾**：显示层 `cleanTitle` 去掉「剥 emoji/前缀」逻辑（content 已干净）；移除不再使用的 `dateFormat` + java import；新增可复用 E2E 脚本 `android_client/e2e/phone_to_mh_e2e.sh`（simulate SMS/通知 → 查服务器库，断言 content 干净 + metadata 结构化；实测 **PASS**）。
+- **单元测试（2026-09-04）**：服务器 `tests/` pytest 套件（临时 SQLite + `MH_API_KEY`）——`test_auth`（无 key→401、对 key→200、错 key→401、`/health` 开放）、`test_messages`（POST 干净 content + 结构化 metadata → 201 + GET 回查），**7 passed**；安卓 JVM 单测——抽出纯函数 `MessageFormatter`/`MessageMapper` 并让 use case/ApiClient 复用，`MessageFormatterTest` 6 + `MessageMapperTest` 7，**14 例全过**；`requirements-dev.txt` 加 pytest。
+- **忽略/屏蔽 app 列表（2026-09-04）**：`AppPreferences.removeBlockedApp`；主页长按菜单按状态显示「禁止/取消屏蔽此 app 的通知」（toggle，`blockedApps` 状态驱动）；设置页新增「已忽略的通知 apps」列表 + 移除按钮。
 
 

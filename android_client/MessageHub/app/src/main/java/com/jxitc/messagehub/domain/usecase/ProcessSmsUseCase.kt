@@ -9,6 +9,7 @@ import com.jxitc.messagehub.domain.model.SmsProcessingResult
 import com.jxitc.messagehub.domain.model.SourceType
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.domain.service.MemorySyncService
+import com.jxitc.messagehub.domain.service.MessageFormatter
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
@@ -44,7 +45,7 @@ class ProcessSmsUseCase(
             )
             
             // Format SMS content for memory
-            val formattedContent = formatSmsAsMemory(smsMessage)
+            val formattedContent = MessageFormatter.sms(smsMessage.content)
             
             // Create memory request
             val request = MemoryCreationRequest(
@@ -123,10 +124,5 @@ class ProcessSmsUseCase(
             Logger.e("ProcessSmsUseCase", "Error resolving contact name for $phoneNumber", e)
             null
         }
-    }
-    
-    /** 干净的原始正文：不带任何 emoji/前缀/时间戳；结构化信息走 metadata。 */
-    private fun formatSmsAsMemory(smsMessage: SmsMessage): String {
-        return smsMessage.content.trim()
     }
 }

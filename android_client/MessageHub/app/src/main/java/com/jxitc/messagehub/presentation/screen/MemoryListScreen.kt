@@ -49,7 +49,8 @@ fun MemoryListScreen(
     viewModel: MemoryListViewModel,
     onNavigateToAddMemory: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onBlockApp: (String) -> Unit = {}
+    blockedApps: Set<String> = emptySet(),
+    onToggleBlock: (String) -> Unit = {}
 ) {
     val memories by viewModel.memories.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -130,7 +131,8 @@ fun MemoryListScreen(
                         MemoryGroupCard(
                             group = group,
                             onItemClick = { selectedMemory = it },
-                            onBlockApp = onBlockApp
+                            blockedApps = blockedApps,
+                            onToggleBlock = onToggleBlock
                         )
                     }
                     // 渐进式展示: 还有更多聚合组时显示「载入更多」
@@ -227,7 +229,8 @@ private fun memoryPackageName(m: Memory): String? =
 private fun MemoryGroupCard(
     group: MemoryGroup,
     onItemClick: (Memory) -> Unit = {},
-    onBlockApp: (String) -> Unit = {}
+    blockedApps: Set<String> = emptySet(),
+    onToggleBlock: (String) -> Unit = {}
 ) {
     var expanded by remember(group.key) { mutableStateOf(false) }
     // 分组头部长按屏蔽菜单状态(包名取自分组首条 metadata)
@@ -281,8 +284,9 @@ private fun MemoryGroupCard(
                     BlockAppDropdownMenu(
                         expanded = headerMenuOpen,
                         packageName = groupPkg,
+                        isBlocked = groupPkg != null && blockedApps.contains(groupPkg),
                         onDismiss = { headerMenuOpen = false },
-                        onBlockApp = onBlockApp
+                        onToggleBlock = onToggleBlock
                     )
                 }
 
@@ -317,8 +321,9 @@ private fun MemoryGroupCard(
                             BlockAppDropdownMenu(
                                 expanded = rowMenuOpen,
                                 packageName = rowPkg,
+                                isBlocked = rowPkg != null && blockedApps.contains(rowPkg),
                                 onDismiss = { rowMenuOpen = false },
-                                onBlockApp = onBlockApp
+                                onToggleBlock = onToggleBlock
                             )
                         }
                     }
@@ -336,16 +341,17 @@ private fun MemoryGroupCard(
 private fun BlockAppDropdownMenu(
     expanded: Boolean,
     packageName: String?,
+    isBlocked: Boolean = false,
     onDismiss: () -> Unit,
-    onBlockApp: (String) -> Unit
+    onToggleBlock: (String) -> Unit
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (!packageName.isNullOrBlank()) {
             DropdownMenuItem(
-                text = { Text("禁止此 app 的通知") },
+                text = { Text(if (isBlocked) "取消屏蔽此 app 的通知" else "禁止此 app 的通知") },
                 onClick = {
                     onDismiss()
-                    onBlockApp(packageName)
+                    onToggleBlock(packageName)
                 }
             )
         }

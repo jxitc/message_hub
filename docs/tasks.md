@@ -8,6 +8,8 @@
 - [x] 域名 **mh.jxitc.com**：Squarespace `A` 记录 + nginx 反代 → `127.0.0.1:5001` + Let's Encrypt HTTPS（http→https 301）
 - [x] Web UI 深色主题 + Messages 分页 Jinja `min()` bug 修复
 - [x] 消息内容 schema 精简（2026-09-04）：`content` 只存原始正文（去 🔔/📱/英文标签/时间戳），结构化放 `type`/`sender`/`message_metadata`（`source`/`app_name`/`title`/`phone_number`/`message_id` 等）；Android 两个 processor + metadata 已改并验证；显示层去 emoji 剥离；新增可复用 E2E 脚本 `android_client/e2e/phone_to_mh_e2e.sh`（PASS）
+- [x] **单元测试补上**（2026-09-04）：服务器 pytest 套件 `tests/`（`conftest` 临时 SQLite + `MH_API_KEY`；`test_auth` 鉴权 401/200/错 key、`test_messages` 干净 content + 结构化 metadata；**7 passed**）；安卓 JVM 单测（抽出纯函数 `MessageFormatter`/`MessageMapper`，`MessageFormatterTest`6 + `MessageMapperTest`7；**14 例全过**）。`requirements-dev.txt` 加 pytest
+- [x] **忽略/屏蔽 app 列表**（2026-09-04）：`AppPreferences.removeBlockedApp`；主页长按菜单按状态显示「禁止/取消屏蔽此 app 的通知」（toggle）；设置页新增「已忽略的通知 apps」列表 + 可移除
 
 ### 待办
 - [x] **API Key 鉴权**（重点：客户端手机端）——服务器 `/api/v1/*` 校验 `X-API-Key`（无 key→401、带 key→200、错 key→401、POST→201）；安卓端 `AppPreferences.apiKey` + OkHttp 拦截器自动带头；新 APK 已装手机并设 `server_url=https://mh.jxitc.com` + `api_key`；**E2E 通过**（simulate_sms → 远端 MH 库新增 `android-phone-1` SMS）

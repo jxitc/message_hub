@@ -6,6 +6,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -29,6 +30,7 @@ fun SettingsScreen(
     val serverUrl by viewModel.serverUrl.collectAsStateWithLifecycle()
     val autoSync by viewModel.autoSync.collectAsStateWithLifecycle()
     val syncOnlyOnWifi by viewModel.syncOnlyOnWifi.collectAsStateWithLifecycle()
+    val blockedApps by viewModel.blockedApps.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val healthCheckResult by viewModel.healthCheckResult.collectAsStateWithLifecycle()
@@ -470,7 +472,49 @@ fun SettingsScreen(
                     }
                 }
             }
-            
+
+            // Ignored/blocked notification apps section
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "已忽略的通知 apps",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    if (blockedApps.isEmpty()) {
+                        Text(
+                            text = "没有忽略任何 app。在主页长按某个通知条目可屏蔽该 app 的通知。",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        blockedApps.sorted().forEach { pkg ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = pkg,
+                                    modifier = Modifier.weight(1f),
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                IconButton(onClick = { viewModel.removeBlockedApp(pkg) }) {
+                                    Icon(
+                                        imageVector = Icons.Default.Close,
+                                        contentDescription = "取消屏蔽 $pkg",
+                                        tint = MaterialTheme.colorScheme.error
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             // Error Display
             error?.let { errorMessage ->
                 Card(

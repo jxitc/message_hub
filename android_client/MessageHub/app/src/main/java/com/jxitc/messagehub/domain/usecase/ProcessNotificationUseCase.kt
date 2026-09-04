@@ -8,6 +8,7 @@ import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.domain.model.SourceType
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.domain.service.MemorySyncService
+import com.jxitc.messagehub.domain.service.MessageFormatter
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
@@ -51,7 +52,7 @@ class ProcessNotificationUseCase(
             )
 
             // Format notification content for memory
-            val formattedContent = formatNotificationAsMemory(notificationMessage)
+            val formattedContent = MessageFormatter.notification(notificationMessage.title, notificationMessage.content)
 
             // Create memory request
             val request = MemoryCreationRequest(
