@@ -12,6 +12,39 @@
     </div>
 </div>
 
+<!-- Import Email control -->
+<div class="row mb-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-center gap-3">
+                    <div class="flex-grow-1">
+                        <h6 class="card-title mb-1">
+                            <i class="bi bi-envelope-arrow-down"></i> Import Email
+                        </h6>
+                        <p class="text-muted mb-0 small">
+                            Pull recent mail from the configured IMAP mailbox(es) into Message Hub.
+                            Only mail from the last {{ import_days }} day(s) is collected; your mailbox
+                            read/unread state is left untouched.
+                        </p>
+                    </div>
+                    <button id="btn-import-email" class="btn btn-outline-primary"
+                            onclick="startEmailImport()">
+                        <i class="bi bi-cloud-download"></i> Import last {{ import_days }} day
+                    </button>
+                </div>
+                <div id="import-email-result" class="mt-3" style="display: none;">
+                    <div id="import-email-spinner" class="text-muted small">
+                        <span class="spinner-border spinner-border-sm me-1" role="status"></span>
+                        Importing... this may take a few seconds.
+                    </div>
+                    <div id="import-email-done" class="small"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- Stats Cards Row -->
 <div class="row mb-4">
     <div class="col-md-3 mb-3">
@@ -268,6 +301,79 @@ function initDashboard() {
             location.reload();
         }
     }, 60000);
+}
+
+// ---- Email import (Dashboard) ----
+function startEmailImport() {
+    const btn = document.getElementById('btn-import-email');
+    const resultBox = document.getElementById('import-email-result');
+    const spinner = document.getElementById('import-email-spinner');
+    const done = document.getElementById('import-email-done');
+
+    btn.disabled = true;
+    resultBox.style.display = 'block';
+    spinner.style.display = '';
+    done.style.display = 'none';
+    done.className = 'small';
+    done.textContent = '';
+
+    fetch('/import-email', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({since_days: {{ import_days }}})
+    })
+    .then(function(resp) {
+        return resp.json().then(function(data) { return {ok: resp.ok, data: data}; });
+    })
+    .then(function(r) {
+        if (!r.ok) {
+            spinner.style.display = 'none';
+            done.style.display = '';
+            done.className = 'small text-danger';
+            done.textContent = 'Failed to start import: ' + (r.data.error || 'unknown error');
+            btn.disabled = false;
+            return;
+        }
+        // Poll until the background collect finishes.
+        const poll = setInterval(function() {
+            fetch('/import-email/status')
+            .then(function(resp) { return resp.json(); })
+            .then(function(s) {
+                if (s.running) return;
+                clearInterval(poll);
+                spinner.style.display = 'none';
+                done.style.display = '';
+                btn.disabled = false;
+                if (s.error) {
+                    done.className = 'small text-danger';
+                    done.textContent = 'Import failed: ' + s.error;
+                } else if (s.last) {
+                    let lines = [];
+                    Object.keys(s.last).forEach(function(label) {
+                        const st = s.last[label];
+                        if (st.error) {
+                            lines.push(label + ': error (' + st.error + ')');
+                        } else {
+                            lines.push(label + ': ' + st.imported + ' imported, ' +
+                                       st.failed + ' failed, ' + st.skipped + ' skipped');
+                        }
+                    });
+                    done.className = 'small';
+                    done.textContent = 'Import finished — ' + lines.join(' · ');
+                    // Reload stats so the dashboard reflects new messages.
+                    location.reload();
+                }
+            })
+            .catch(function() { clearInterval(poll); btn.disabled = false; });
+        }, 1500);
+    })
+    .catch(function(err) {
+        spinner.style.display = 'none';
+        done.style.display = '';
+        done.className = 'small text-danger';
+        done.textContent = 'Failed to start import: ' + err;
+        btn.disabled = false;
+    });
 }
 </script>
 {% endblock %}

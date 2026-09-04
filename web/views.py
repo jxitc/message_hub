@@ -5,6 +5,102 @@ from models import db, Message, Device
 from . import web
 import requests
 import json
+import os
+import threading
+import time
+
+# ---------------------------------------------------------------------------
+# Manual "Import Email" trigger (Dashboard button)
+#
+# POST   /import-email            -> start a background collect (since_days=N)
+# GET    /import-email/status     -> {running, last, error, started_at, ...}
+#
+# The endpoint returns immediately and the collect runs on a daemon thread so a
+# single gunicorn worker does not deadlock while the collector POSTs messages
+# back to this same server. State lives in-process (fine for WORKERS=1).
+# ---------------------------------------------------------------------------
+
+_import_lock = threading.Lock()
+_import_state = {
+    'running': False,
+    'started_at': None,
+    'finished_at': None,
+    'last': None,      # {label: {imported, failed, skipped}} from last run
+    'error': None,
+    'accounts': 0,     # number of configured IMAP accounts at trigger time
+    'since_days': None,
+}
+
+
+def _is_import_running():
+    with _import_lock:
+        return bool(_import_state.get('running'))
+
+
+def _set_import_running(flag):
+    with _import_lock:
+        _import_state['running'] = flag
+
+
+@web.route('/import-email', methods=['POST'])
+def import_email():
+    """Start a background mail collect. Body (JSON): {"since_days": N}."""
+    since_days = 1
+    body = request.get_json(silent=True) or {}
+    try:
+        since_days = int(body.get('since_days', 1))
+    except (TypeError, ValueError):
+        return jsonify({'error': 'since_days must be an integer'}), 400
+    if since_days < 1:
+        return jsonify({'error': 'since_days must be >= 1'}), 400
+
+    if _is_import_running():
+        return jsonify({'error': 'A mail import is already running'}), 409
+
+    # How many accounts are configured right now (best-effort).
+    try:
+        import mail_collector
+        accounts = mail_collector.load_accounts()
+    except Exception:
+        accounts = []
+    if not accounts:
+        return jsonify({'error': 'No mail accounts configured '
+                                 '(set MAIL_ACCOUNTS in the server .env)'}), 400
+
+    with _import_lock:
+        _import_state.update({
+            'running': True,
+            'started_at': time.time(),
+            'finished_at': None,
+            'last': None,
+            'error': None,
+            'accounts': len(accounts),
+            'since_days': since_days,
+        })
+
+    def _worker():
+        try:
+            result = mail_collector.run_once(since_days=since_days)
+            with _import_lock:
+                _import_state['last'] = result
+        except Exception as exc:  # pragma: no cover - defensive
+            with _import_lock:
+                _import_state['error'] = str(exc)
+        finally:
+            with _import_lock:
+                _import_state['running'] = False
+                _import_state['finished_at'] = time.time()
+
+    threading.Thread(target=_worker, daemon=True, name='mail-import').start()
+    return jsonify({'started': True, 'since_days': since_days})
+
+
+@web.route('/import-email/status')
+def import_email_status():
+    with _import_lock:
+        state = dict(_import_state)
+    return jsonify(state)
+
 
 @web.route('/')
 @web.route('/dashboard')
@@ -57,7 +153,8 @@ def dashboard():
         
         return render_template('dashboard.html', 
                              stats=stats, 
-                             recent_messages=recent_messages)
+                             recent_messages=recent_messages,
+                             import_days=1)
     
     except Exception as e:
         flash(f'Error loading dashboard: {str(e)}', 'error')

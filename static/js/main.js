@@ -1,7 +1,11 @@
 // Message Hub Web Interface JavaScript
 
-// Configuration - reuse same as CLI
-const DEFAULT_SERVER_URL = "http://127.0.0.1:5001";
+// Configuration.
+// The web UI is always served same-origin (it's rendered by the server it
+// talks to), so fetch() calls use relative URLs. An empty serverUrl means
+// "this site" — never hard-code 127.0.0.1:5001 here: when the page is opened
+// via the public domain, that address points at the *visitor's* machine.
+const DEFAULT_SERVER_URL = "";
 const config = {
     serverUrl: DEFAULT_SERVER_URL
 };
@@ -35,12 +39,18 @@ function initializeApp() {
 }
 
 function loadConfig() {
-    // Load from localStorage (similar to CLI's config file)
+    // Load from localStorage (similar to CLI's config file).
+    // Only honor a relative path if one was ever stored; ignore any absolute
+    // URL (e.g. a stale "http://127.0.0.1:5001" saved by an older version)
+    // because the web UI must always talk to the server it came from.
     const savedConfig = localStorage.getItem('messageHub.config');
     if (savedConfig) {
         try {
             const configData = JSON.parse(savedConfig);
-            config.serverUrl = configData.serverUrl || DEFAULT_SERVER_URL;
+            const url = configData.serverUrl;
+            if (url && !/^[a-z][a-z0-9+.-]*:\/\//i.test(url)) {
+                config.serverUrl = url.replace(/\/+$/, '');
+            }
         } catch (e) {
             console.warn('Could not load saved config:', e);
         }
@@ -126,10 +136,13 @@ async function markMessageAsRead(messageId, buttonElement) {
     buttonElement.disabled = true;
     
     try {
-        const response = await fetch(`${config.serverUrl}/api/v1/messages/${messageId}/read`, {
-            method: 'PUT',
+        // Use the web route (same-origin POST) instead of the /api/v1 endpoint:
+        // the API requires an X-API-Key header that must not be shipped to the
+        // browser, and the web route returns JSON when we ask for it.
+        const response = await fetch(`/messages/${messageId}/read`, {
+            method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
+                'Accept': 'application/json'
             }
         });
         

@@ -15,6 +15,7 @@ import os
 import sys
 import tempfile
 import unittest
+import calendar
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -79,6 +80,18 @@ Content-Type: text/plain; charset=utf-8
 
 body
 """.encode('utf-8')
+
+# A mail dated "now" (2026-09-05 UTC) — used for the --since-days window test.
+RECENT_MAIL = b"""\
+From: Recent Sender <recent@example.com>
+To: bob@example.com
+Subject: Fresh message
+Date: Fri, 05 Sep 2026 08:00:00 +0000
+Message-ID: <recent-1@example.com>
+Content-Type: text/plain; charset=utf-8
+
+This one is inside the window.
+"""
 
 
 class TestParsing(unittest.TestCase):
@@ -347,6 +360,64 @@ class TestCollectFlow(unittest.TestCase):
             ok, detail = mc.report_message({'a': 1})
             self.assertFalse(ok)
             self.assertIn('connection refused', detail)
+
+    def test_report_message_sends_api_key_when_configured(self):
+        # MH_API_KEY set -> header must be attached (auth added in 2026-09-03).
+        with mock.patch.dict(os.environ, {'MH_API_KEY': 'secret-key'}, clear=False):
+            with mock.patch('mail_collector.requests.post') as post:
+                post.return_value = mock.Mock(status_code=201, text='{}')
+                ok, _ = mc.report_message({'a': 1})
+                self.assertTrue(ok)
+                headers = post.call_args.kwargs.get('headers') or {}
+                self.assertEqual(headers.get('X-API-Key'), 'secret-key')
+
+        # No MH_API_KEY -> no header (local / unauthenticated dev).
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with mock.patch('mail_collector.requests.post') as post:
+                post.return_value = mock.Mock(status_code=201, text='{}')
+                ok, _ = mc.report_message({'a': 1})
+                self.assertTrue(ok)
+                headers = post.call_args.kwargs.get('headers') or {}
+                self.assertNotIn('X-API-Key', headers)
+
+    def test_since_days_only_imports_window_and_keeps_seen_flags(self):
+        # RECENT_MAIL dated 2026-09-04; TEXT_ONLY_MAIL dated 2026-08-31.
+        # Freeze "now" at 2026-09-05 12:00 UTC -> cutoff 2026-09-04 12:00 UTC.
+        fixed_now = calendar.timegm((2026, 9, 5, 12, 0, 0))
+        fake = FakeIMAP([
+            {'uid': '201', 'raw': RECENT_MAIL, 'seen': False},
+            {'uid': '202', 'raw': TEXT_ONLY_MAIL, 'seen': False},
+        ])
+        state = {}
+        with mock.patch('mail_collector.time.time', return_value=fixed_now), \
+             mock.patch('mail_collector.imaplib.IMAP4_SSL', return_value=fake), \
+             mock.patch('mail_collector.requests.post') as post:
+            post.return_value = mock.Mock(status_code=201, text='{}')
+            stats = mc.process_mailbox(
+                {'host': 'imap.gmail.com', 'user': 'a@gmail.com',
+                 'password': 'pw', 'port': 993, 'use_ssl': True,
+                 'folder': 'INBOX', 'label': 'gmail'},
+                state, 'http://127.0.0.1:5001', since_days=1)
+
+        # old mail skipped by the local window filter, recent one imported
+        self.assertEqual(stats['imported'], 1)
+        self.assertEqual(stats['failed'], 0)
+        self.assertEqual(stats['skipped'], 1)
+        self.assertEqual(post.call_count, 1)
+        # seen flags untouched on the real mailbox in since_days mode
+        self.assertTrue(all(m['seen'] is False for m in fake.mails.values()))
+        # dedup state only records the imported message
+        self.assertIn('recent-1@example.com', state['gmail'])
+        self.assertNotIn('text-1@example.com', state['gmail'])
+
+    def test_fetch_recent_uids_uses_since_search(self):
+        conn = mock.Mock()
+        conn.uid.return_value = ('OK', [b'1 2 3'])
+        uids = mc.fetch_recent_uids(conn, 1)
+        self.assertEqual(uids, ['1', '2', '3'])
+        criteria = conn.uid.call_args.args[2]
+        self.assertIsInstance(criteria, str)
+        self.assertTrue(criteria.startswith('(SINCE '))
 
 
 class TestLiveMH(unittest.TestCase):

@@ -345,7 +345,12 @@ async function testConnection() {
     const tests = [];
     
     try {
-        // Test health endpoint
+        // Test health endpoint (same-origin, no API key needed).
+        // NOTE: the /api/v1/* endpoints require an X-API-Key header and are
+        // intentionally NOT tested from the browser (the key must never be
+        // shipped to a web client). Verify the API with the CLI or curl
+        // instead, e.g.:
+        //   curl -H "X-API-Key: $MH_API_KEY" .../api/v1/sync/status
         const healthStart = Date.now();
         const healthResponse = await fetch('/health');
         const healthTime = Date.now() - healthStart;
@@ -356,34 +361,9 @@ async function testConnection() {
             time: healthTime,
             details: healthResponse.ok ? `HTTP ${healthResponse.status}` : `Failed: ${healthResponse.status}`
         });
-        
-        // Test sync status endpoint
-        const syncStart = Date.now();
-        const syncResponse = await fetch('/api/v1/sync/status');
-        const syncTime = Date.now() - syncStart;
-        
-        tests.push({
-            name: 'Sync Status Endpoint',
-            status: syncResponse.ok,
-            time: syncTime,
-            details: syncResponse.ok ? `HTTP ${syncResponse.status}` : `Failed: ${syncResponse.status}`
-        });
-        
-        // Test messages endpoint
-        const messagesStart = Date.now();
-        const messagesResponse = await fetch('/api/v1/messages?per_page=1');
-        const messagesTime = Date.now() - messagesStart;
-        
-        tests.push({
-            name: 'Messages Endpoint',
-            status: messagesResponse.ok,
-            time: messagesTime,
-            details: messagesResponse.ok ? `HTTP ${messagesResponse.status}` : `Failed: ${messagesResponse.status}`
-        });
-        
     } catch (error) {
         tests.push({
-            name: 'Connection Test',
+            name: 'Health Endpoint',
             status: false,
             time: 0,
             details: `Error: ${error.message}`

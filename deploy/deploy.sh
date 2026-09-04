@@ -116,7 +116,7 @@ Type=simple
 User=root
 WorkingDirectory=$REMOTE_DIR
 EnvironmentFile=$REMOTE_DIR/.env
-ExecStart=$REMOTE_DIR/venv/bin/gunicorn -w ${WORKERS} -b 0.0.0.0:${PORT} --timeout 60 "app:create_app()"
+ExecStart=$REMOTE_DIR/venv/bin/gunicorn -w ${WORKERS} --threads 2 -b 0.0.0.0:${PORT} --timeout 60 "app:create_app()"
 Restart=on-failure
 RestartSec=3
 

@@ -47,7 +47,7 @@ import re
 import sys
 import threading
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import requests
 
@@ -271,6 +271,7 @@ def parse_message(raw):
         'subject': subject,
         'date_raw': date_raw or '',
         'date_iso': _to_iso8601(dt),
+        'date_dt': dt.astimezone(timezone.utc) if dt else None,
         'message_id': message_id,
         'body': extract_text_body(msg),
     }
@@ -360,7 +361,25 @@ def connect_account(account):
 
 
 def fetch_unseen_uids(conn):
+    """Legacy: search UIDs of all UNSEEN mails."""
     status, data = conn.uid('SEARCH', None, '(UNSEEN)')
+    if status != 'OK':
+        raise RuntimeError('IMAP SEARCH failed: %r' % (data,))
+    if not data or not data[0]:
+        return []
+    return [uid.decode() for uid in data[0].split()]
+
+
+def fetch_recent_uids(conn, since_days):
+    """Search UIDs of mails received since ~since_days ago.
+
+    IMAP's SINCE is day-granular (server-local dates), so we ask for one
+    extra day back here and let the caller do the precise local filter on the
+    parsed Date header.
+    """
+    since = (datetime.now(timezone.utc) - timedelta(days=since_days + 1)) \
+        .strftime('%d-%b-%Y')
+    status, data = conn.uid('SEARCH', None, '(SINCE %s)' % since)
     if status != 'OK':
         raise RuntimeError('IMAP SEARCH failed: %r' % (data,))
     if not data or not data[0]:
@@ -390,8 +409,12 @@ def mark_seen(conn, uid):
 def report_message(payload, mh_url=DEFAULT_MH_URL, timeout=REQUEST_TIMEOUT):
     """POST one message to MH. Returns (ok: bool, detail: str)."""
     url = '%s/api/v1/messages' % mh_url.rstrip('/')
+    headers = {}
+    api_key = os.environ.get('MH_API_KEY')
+    if api_key:
+        headers['X-API-Key'] = api_key
     try:
-        resp = requests.post(url, json=payload, timeout=timeout)
+        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
         if resp.status_code == 201:
             return True, resp.text
         return False, 'HTTP %s: %s' % (resp.status_code, resp.text[:500])
@@ -399,8 +422,16 @@ def report_message(payload, mh_url=DEFAULT_MH_URL, timeout=REQUEST_TIMEOUT):
         return False, str(exc)
 
 
-def process_mailbox(account, state, mh_url, dry_run=False):
-    """Collect one mailbox. Returns {imported, failed, skipped}."""
+def process_mailbox(account, state, mh_url, dry_run=False, since_days=None):
+    """Collect one mailbox. Returns {imported, failed, skipped}.
+
+    since_days=None  -> legacy UNSEEN mode (marks mails \\Seen as it goes).
+    since_days=N     -> "recent N days" mode: pulls ALL mails (seen or not)
+                        whose Date header is within the window and does NOT
+                        touch the mailbox's \\Seen flags (it is usually the
+                        user's primary mailbox). Dedup is handled purely by
+                        the local state file.
+    """
     label = account['label']
     stats = {'imported': 0, 'failed': 0, 'skipped': 0}
     processed = state.get(label)  # do NOT insert into state unless something
@@ -410,7 +441,13 @@ def process_mailbox(account, state, mh_url, dry_run=False):
 
     conn = connect_account(account)
     try:
-        uids = fetch_unseen_uids(conn)
+        if since_days is not None:
+            cutoff = now - since_days * 86400
+            uids = fetch_recent_uids(conn, since_days)
+        else:
+            cutoff = None
+            uids = fetch_unseen_uids(conn)
+
         for uid in uids:
             uid_key = 'uid:' + uid
             try:
@@ -420,8 +457,16 @@ def process_mailbox(account, state, mh_url, dry_run=False):
 
                 if msg_key in processed or uid_key in processed:
                     stats['skipped'] += 1
-                    mark_seen(conn, uid)  # idempotent; keep mailbox tidy
+                    if since_days is None:
+                        mark_seen(conn, uid)  # idempotent; keep mailbox tidy
                     continue
+
+                # Precise local window filter (IMAP SINCE is day-granular).
+                if cutoff is not None:
+                    d = parsed['date_dt']
+                    if d is None or d.timestamp() < cutoff:
+                        stats['skipped'] += 1
+                        continue
 
                 payload = build_payload(parsed, label)
                 if dry_run:
@@ -435,7 +480,8 @@ def process_mailbox(account, state, mh_url, dry_run=False):
                 if ok:
                     processed[msg_key] = now
                     processed[uid_key] = now
-                    mark_seen(conn, uid)
+                    if since_days is None:
+                        mark_seen(conn, uid)
                     stats['imported'] += 1
                     log.info('imported uid=%s sender=%s subject=%r -> %s',
                              uid, parsed['sender'], parsed['subject'], label)
@@ -460,7 +506,8 @@ def process_mailbox(account, state, mh_url, dry_run=False):
 # Orchestration
 # ---------------------------------------------------------------------------
 
-def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None):
+def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None,
+             since_days=None):
     """Collect every configured mailbox once. Returns
     {mailbox_label: {imported, failed, skipped}}."""
     accounts = accounts if accounts is not None else load_accounts()
@@ -477,7 +524,8 @@ def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None):
     for acc in accounts:
         label = acc['label']
         try:
-            stats[label] = process_mailbox(acc, state, mh_url, dry_run=dry_run)
+            stats[label] = process_mailbox(acc, state, mh_url, dry_run=dry_run,
+                                           since_days=since_days)
         except Exception:
             stats[label] = {'imported': 0, 'failed': 0, 'skipped': 0,
                             'error': 'mailbox failed'}
@@ -489,14 +537,16 @@ def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None):
     return stats
 
 
-def run_collector_loop(interval=300, state_dir=None, dry_run=False, logger=None):
+def run_collector_loop(interval=300, state_dir=None, dry_run=False, logger=None,
+                       since_days=None):
     """Run forever: collect, sleep, repeat. `interval` is seconds."""
     global log
     if logger is not None:
         log = logger
     while True:
         try:
-            stats = run_once(state_dir=state_dir, dry_run=dry_run)
+            stats = run_once(state_dir=state_dir, dry_run=dry_run,
+                             since_days=since_days)
             log.info('collect cycle finished: %s', stats)
         except Exception:
             log.exception('collect cycle crashed')
@@ -515,6 +565,10 @@ def main(argv=None):
                       help='run forever, collecting every N seconds')
     parser.add_argument('--dry-run', action='store_true',
                         help='fetch + parse only; do not POST to MH or mark seen')
+    parser.add_argument('--since-days', type=int, default=None, metavar='N',
+                        help='pull ALL mail (seen or not) from the last N days '
+                             'instead of only UNSEEN mail; does not alter '
+                             '\\Seen flags on the mailbox')
     parser.add_argument('--state-dir', default=None,
                         help='directory for processed_mails.json '
                              '(default: ~/.message_hub or $MAIL_STATE_DIR)')
@@ -527,12 +581,13 @@ def main(argv=None):
         format='%(asctime)s %(levelname)s %(name)s: %(message)s')
 
     if args.watch:
-        log.info('starting watch loop (interval=%ss, dry_run=%s)',
-                 args.watch, args.dry_run)
+        log.info('starting watch loop (interval=%ss, dry_run=%s, since_days=%s)',
+                 args.watch, args.dry_run, args.since_days)
         run_collector_loop(interval=args.watch, state_dir=args.state_dir,
-                           dry_run=args.dry_run)
+                           dry_run=args.dry_run, since_days=args.since_days)
     else:
-        stats = run_once(state_dir=args.state_dir, dry_run=args.dry_run)
+        stats = run_once(state_dir=args.state_dir, dry_run=args.dry_run,
+                         since_days=args.since_days)
         print(json.dumps(stats, ensure_ascii=False, indent=2))
         log.info('cycle done: %s', stats)
 
