@@ -13,8 +13,6 @@ import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import java.text.SimpleDateFormat
-import java.util.*
 
 /**
  * Use case for processing SMS messages into memories
@@ -27,8 +25,6 @@ class ProcessSmsUseCase(
     private val syncService: MemorySyncService
 ) {
     private val syncScope = CoroutineScope(Dispatchers.IO)
-    
-    private val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
     
     suspend fun processSmsMessage(phoneNumber: String, content: String, timestamp: Long): SmsProcessingResult {
         try {

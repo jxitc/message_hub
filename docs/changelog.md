@@ -117,5 +117,6 @@
   - 通知：`content='WeChat\nhello'`、`sender='微信'`、metadata 含 `source/app_name/package_name/notification_id/title`
 - 兼容：历史消息仍为旧格式不清理；新消息干净。服务器 schema 无需改（本就有 `message_metadata` JSON）。
 - ⚠️ adb 发含空格 body 会被截断（`--es` 引号陷阱），测试用无空格标记。
+- **收尾**：显示层 `cleanTitle` 去掉「剥 emoji/前缀」逻辑（content 已干净）；移除不再使用的 `dateFormat` + java import；新增可复用 E2E 脚本 `android_client/e2e/phone_to_mh_e2e.sh`（simulate SMS/通知 → 查服务器库，断言 content 干净 + metadata 结构化；实测 **PASS**）。
 
 

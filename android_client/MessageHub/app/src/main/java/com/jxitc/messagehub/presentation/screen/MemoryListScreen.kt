@@ -352,13 +352,9 @@ private fun BlockAppDropdownMenu(
     }
 }
 
-/** 去掉 title 里常见的 emoji/类型前缀, 让标题干净 */
+/** 标题干净化：content 已是干净正文（无 emoji/类型前缀），仅做 trim。 */
 private fun cleanTitle(title: String): String {
-    var t = title.trim()
-    // 去掉开头 emoji (如 🔔\uD83D\uDD14, 📱 等) 和紧随的 "Notification / SMS Message" 前缀
-    t = t.replace(Regex("^[\\p{So}\\p{Cs}]+\\s*"), "")
-    t = t.replace(Regex("^(Notification|SMS Message|Email|Call Log)\\s*", RegexOption.IGNORE_CASE), "")
-    return t.trim()
+    return title.trim()
 }
 
 /** 用来源 app 的真实图标; 拿不到则用默认通知图标 */
