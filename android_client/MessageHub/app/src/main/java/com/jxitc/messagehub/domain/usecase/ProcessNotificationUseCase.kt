@@ -8,12 +8,11 @@ import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.domain.model.SourceType
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.domain.service.MemorySyncService
+import com.jxitc.messagehub.domain.service.MessageFormatter
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import java.text.SimpleDateFormat
-import java.util.*
 
 /**
  * Use case for processing notifications into memories
@@ -26,8 +25,6 @@ class ProcessNotificationUseCase(
     private val syncService: MemorySyncService
 ) {
     private val syncScope = CoroutineScope(Dispatchers.IO)
-
-    private val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
 
     suspend fun processNotification(
         packageName: String,
@@ -55,16 +52,18 @@ class ProcessNotificationUseCase(
             )
 
             // Format notification content for memory
-            val formattedContent = formatNotificationAsMemory(notificationMessage)
+            val formattedContent = MessageFormatter.notification(notificationMessage.title, notificationMessage.content)
 
             // Create memory request
             val request = MemoryCreationRequest(
                 content = formattedContent,
                 sourceType = SourceType.NOTIFICATION,
                 metadata = mapOf(
+                    "source" to "app",
                     "package_name" to packageName,
                     "app_name" to (appName ?: ""),
                     "notification_id" to notificationId.toString(),
+                    "title" to title,
                     "timestamp" to timestamp.toString()
                 )
             )
@@ -116,21 +115,14 @@ class ProcessNotificationUseCase(
         }
     }
 
+    /** 干净正文：优先 title 行 + 正文行；不带 emoji/标签/时间；结构化信息走 metadata。 */
     private fun formatNotificationAsMemory(notification: NotificationMessage): String {
-        val timestamp = dateFormat.format(Date(notification.timestamp))
-        val appDisplay = notification.appName ?: notification.packageName
-
-        return buildString {
-            appendLine("🔔 Notification")
-            appendLine("App: $appDisplay")
-            appendLine("Time: $timestamp")
-            appendLine()
-            if (notification.title.isNotBlank()) {
-                appendLine("Title: ${notification.title}")
-            }
-            if (notification.content.isNotBlank()) {
-                appendLine("Content: ${notification.content}")
-            }
+        val title = notification.title.trim()
+        val body = notification.content.trim()
+        return when {
+            title.isNotEmpty() && body.isNotEmpty() -> "$title\n$body"
+            title.isNotEmpty() -> title
+            else -> body
         }
     }
 }

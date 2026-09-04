@@ -49,7 +49,8 @@ fun MemoryListScreen(
     viewModel: MemoryListViewModel,
     onNavigateToAddMemory: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
-    onBlockApp: (String) -> Unit = {}
+    blockedApps: Set<String> = emptySet(),
+    onToggleBlock: (String) -> Unit = {}
 ) {
     val memories by viewModel.memories.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
@@ -130,7 +131,8 @@ fun MemoryListScreen(
                         MemoryGroupCard(
                             group = group,
                             onItemClick = { selectedMemory = it },
-                            onBlockApp = onBlockApp
+                            blockedApps = blockedApps,
+                            onToggleBlock = onToggleBlock
                         )
                     }
                     // 渐进式展示: 还有更多聚合组时显示「载入更多」
@@ -227,7 +229,8 @@ private fun memoryPackageName(m: Memory): String? =
 private fun MemoryGroupCard(
     group: MemoryGroup,
     onItemClick: (Memory) -> Unit = {},
-    onBlockApp: (String) -> Unit = {}
+    blockedApps: Set<String> = emptySet(),
+    onToggleBlock: (String) -> Unit = {}
 ) {
     var expanded by remember(group.key) { mutableStateOf(false) }
     // 分组头部长按屏蔽菜单状态(包名取自分组首条 metadata)
@@ -281,8 +284,9 @@ private fun MemoryGroupCard(
                     BlockAppDropdownMenu(
                         expanded = headerMenuOpen,
                         packageName = groupPkg,
+                        isBlocked = groupPkg != null && blockedApps.contains(groupPkg),
                         onDismiss = { headerMenuOpen = false },
-                        onBlockApp = onBlockApp
+                        onToggleBlock = onToggleBlock
                     )
                 }
 
@@ -317,8 +321,9 @@ private fun MemoryGroupCard(
                             BlockAppDropdownMenu(
                                 expanded = rowMenuOpen,
                                 packageName = rowPkg,
+                                isBlocked = rowPkg != null && blockedApps.contains(rowPkg),
                                 onDismiss = { rowMenuOpen = false },
-                                onBlockApp = onBlockApp
+                                onToggleBlock = onToggleBlock
                             )
                         }
                     }
@@ -336,29 +341,26 @@ private fun MemoryGroupCard(
 private fun BlockAppDropdownMenu(
     expanded: Boolean,
     packageName: String?,
+    isBlocked: Boolean = false,
     onDismiss: () -> Unit,
-    onBlockApp: (String) -> Unit
+    onToggleBlock: (String) -> Unit
 ) {
     DropdownMenu(expanded = expanded, onDismissRequest = onDismiss) {
         if (!packageName.isNullOrBlank()) {
             DropdownMenuItem(
-                text = { Text("禁止此 app 的通知") },
+                text = { Text(if (isBlocked) "取消屏蔽此 app 的通知" else "禁止此 app 的通知") },
                 onClick = {
                     onDismiss()
-                    onBlockApp(packageName)
+                    onToggleBlock(packageName)
                 }
             )
         }
     }
 }
 
-/** 去掉 title 里常见的 emoji/类型前缀, 让标题干净 */
+/** 标题干净化：content 已是干净正文（无 emoji/类型前缀），仅做 trim。 */
 private fun cleanTitle(title: String): String {
-    var t = title.trim()
-    // 去掉开头 emoji (如 🔔\uD83D\uDD14, 📱 等) 和紧随的 "Notification / SMS Message" 前缀
-    t = t.replace(Regex("^[\\p{So}\\p{Cs}]+\\s*"), "")
-    t = t.replace(Regex("^(Notification|SMS Message|Email|Call Log)\\s*", RegexOption.IGNORE_CASE), "")
-    return t.trim()
+    return title.trim()
 }
 
 /** 用来源 app 的真实图标; 拿不到则用默认通知图标 */

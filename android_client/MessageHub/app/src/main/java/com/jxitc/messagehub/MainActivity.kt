@@ -90,12 +90,21 @@ fun MessageHubApp(
             composable("memory_list") {
                 val viewModel = remember { appContainer.createMemoryListViewModel() }
                 val context = LocalContext.current
+                // 长按屏蔽/取消屏蔽 app：写入黑名单(SharedPreferences) + Toast; 只拦新通知, 旧记录保留
+                var blockedApps by remember { mutableStateOf(appContainer.appPreferences.blockedApps) }
                 MemoryListScreen(
                     viewModel = viewModel,
-                    // 长按屏蔽 app: 写入黑名单(SharedPreferences) + Toast 反馈; 只拦新通知, 旧记录保留
-                    onBlockApp = { pkg ->
-                        appContainer.appPreferences.addBlockedApp(pkg)
-                        Toast.makeText(context, "已屏蔽 $pkg 的通知，后续新通知不再记录", Toast.LENGTH_SHORT).show()
+                    blockedApps = blockedApps,
+                    onToggleBlock = { pkg ->
+                        val prefs = appContainer.appPreferences
+                        val nowBlocked = prefs.isAppBlocked(pkg)
+                        if (nowBlocked) prefs.removeBlockedApp(pkg) else prefs.addBlockedApp(pkg)
+                        blockedApps = prefs.blockedApps
+                        Toast.makeText(
+                            context,
+                            if (nowBlocked) "已取消屏蔽 $pkg 的通知" else "已屏蔽 $pkg 的通知，后续新通知不再记录",
+                            Toast.LENGTH_SHORT
+                        ).show()
                     },
                     onNavigateToAddMemory = {
                         navController.navigate("add_memory")

@@ -161,36 +161,12 @@ class MessageHubApiClient(
     private fun MemoryCreationRequest.toMessageCreateRequest(): MessageCreateRequest {
         return MessageCreateRequest(
             sourceDeviceId = SOURCE_DEVICE_ID,
-            type = mapToMessageType(sourceType, metadata),
-            sender = resolveSender(metadata),
+            type = MessageMapper.mapToMessageType(sourceType, metadata),
+            sender = MessageMapper.resolveSender(metadata),
             content = content,
             timestamp = resolveTimestamp(metadata),
             metadata = metadata // pass through (contains phone/app source info)
         )
-    }
-
-    /** SourceType -> MH message type. MANUAL/others fall back to SMS unless metadata looks like a notification. */
-    private fun mapToMessageType(sourceType: SourceType, metadata: Map<String, String>): String {
-        return when (sourceType) {
-            SourceType.SMS -> "SMS"
-            SourceType.NOTIFICATION -> "PUSH_NOTIFICATION"
-            SourceType.MANUAL -> {
-                val looksLikeNotification = metadata.containsKey("app_name") ||
-                    metadata.containsKey("package_name") ||
-                    metadata.containsKey("notification_id")
-                if (looksLikeNotification) "PUSH_NOTIFICATION" else "SMS"
-            }
-            // MH MVP only supports SMS/PUSH_NOTIFICATION/CALL_LOG/EMAIL
-            SourceType.SCREENSHOT, SourceType.SHARE_INTENT -> "SMS"
-        }
-    }
-
-    /** Sender = contact_name > phone_number > app_name > package_name > "unknown". */
-    private fun resolveSender(metadata: Map<String, String>): String {
-        val candidate = listOf("contact_name", "phone_number", "app_name", "package_name")
-            .mapNotNull { metadata[it]?.takeIf { v -> v.isNotBlank() } }
-            .firstOrNull()
-        return candidate ?: "unknown"
     }
 
     /**

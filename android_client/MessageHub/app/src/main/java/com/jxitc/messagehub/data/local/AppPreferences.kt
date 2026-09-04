@@ -44,6 +44,13 @@ class AppPreferences(context: Context) {
         prefs.edit().putStringSet(KEY_BLOCKED_APPS, updated).apply()
         Logger.i("App blocked from notifications: $packageName")
     }
+
+    /** 取消屏蔽某个 app: 移出黑名单 */
+    fun removeBlockedApp(packageName: String) {
+        val updated = blockedApps - packageName
+        prefs.edit().putStringSet(KEY_BLOCKED_APPS, updated).apply()
+        Logger.i("App unblocked from notifications: $packageName")
+    }
     
     fun isServerConfigured(): Boolean {
         return serverUrl.isNotBlank() && serverUrl != DEFAULT_SERVER_URL && apiKey.isNotBlank()

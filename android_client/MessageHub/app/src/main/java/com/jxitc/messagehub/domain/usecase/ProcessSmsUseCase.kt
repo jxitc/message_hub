@@ -9,12 +9,11 @@ import com.jxitc.messagehub.domain.model.SmsProcessingResult
 import com.jxitc.messagehub.domain.model.SourceType
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.domain.service.MemorySyncService
+import com.jxitc.messagehub.domain.service.MessageFormatter
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import java.text.SimpleDateFormat
-import java.util.*
 
 /**
  * Use case for processing SMS messages into memories
@@ -27,8 +26,6 @@ class ProcessSmsUseCase(
     private val syncService: MemorySyncService
 ) {
     private val syncScope = CoroutineScope(Dispatchers.IO)
-    
-    private val dateFormat = SimpleDateFormat("MMM dd, yyyy HH:mm", Locale.getDefault())
     
     suspend fun processSmsMessage(phoneNumber: String, content: String, timestamp: Long): SmsProcessingResult {
         try {
@@ -48,15 +45,17 @@ class ProcessSmsUseCase(
             )
             
             // Format SMS content for memory
-            val formattedContent = formatSmsAsMemory(smsMessage)
+            val formattedContent = MessageFormatter.sms(smsMessage.content)
             
             // Create memory request
             val request = MemoryCreationRequest(
                 content = formattedContent,
                 sourceType = SourceType.SMS,
                 metadata = mapOf(
+                    "source" to "phone",
                     "phone_number" to phoneNumber,
                     "contact_name" to (contactName ?: ""),
+                    "message_id" to (smsMessage.messageId ?: ""),
                     "timestamp" to timestamp.toString()
                 )
             )
@@ -124,19 +123,6 @@ class ProcessSmsUseCase(
         } catch (e: Exception) {
             Logger.e("ProcessSmsUseCase", "Error resolving contact name for $phoneNumber", e)
             null
-        }
-    }
-    
-    private fun formatSmsAsMemory(smsMessage: SmsMessage): String {
-        val timestamp = dateFormat.format(Date(smsMessage.timestamp))
-        val sender = smsMessage.contactName ?: smsMessage.phoneNumber
-        
-        return buildString {
-            appendLine("📱 SMS Message")
-            appendLine("From: $sender")
-            appendLine("Received: $timestamp")
-            appendLine()
-            appendLine(smsMessage.content)
         }
     }
 }

@@ -22,6 +22,9 @@ class SettingsViewModel(
     
     private val _syncOnlyOnWifi = MutableStateFlow(preferences.syncOnlyOnWifi)
     val syncOnlyOnWifi: StateFlow<Boolean> = _syncOnlyOnWifi.asStateFlow()
+
+    private val _blockedApps = MutableStateFlow(preferences.blockedApps)
+    val blockedApps: StateFlow<Set<String>> = _blockedApps.asStateFlow()
     
     private val _healthCheckResult = MutableStateFlow<String?>(null)
     val healthCheckResult: StateFlow<String?> = _healthCheckResult.asStateFlow()
@@ -40,6 +43,12 @@ class SettingsViewModel(
     fun updateSyncOnlyOnWifi(enabled: Boolean) {
         _syncOnlyOnWifi.value = enabled
         preferences.syncOnlyOnWifi = enabled
+    }
+
+    /** 取消屏蔽某个 app（设置页移除） */
+    fun removeBlockedApp(packageName: String) {
+        preferences.removeBlockedApp(packageName)
+        _blockedApps.value = preferences.blockedApps
     }
     
     fun testConnection() {
