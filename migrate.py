@@ -1,11 +1,16 @@
 #!/usr/bin/env python3
-"""migrate.py — small idempotent schema migrations for Message Hub.
+"""migrate.py — small idempotent schema/data migrations for Message Hub.
 
 Run after ``db.create_all()`` (deploy.sh does this). Kept deliberately tiny
 because the project uses SQLite (with optional PostgreSQL via DATABASE_URL).
 
-Current migration: drop the ``messages.is_read`` column (read/unread feature
-removed 2026-09-04). Safe to run repeatedly — it checks the live schema first.
+Migrations:
+1. drop the ``messages.is_read`` column (read/unread feature removed 2026-09-04).
+2. strip the duplicated recipient keys (``to``/``cc``/``delivered_to``/
+   ``original_to``) out of email metadata, leaving ``recipients`` as the single
+   source of truth. See build_payload() in mail_collector.py.
+
+Safe to run repeatedly — each step checks the current shape first.
 """
 
 import os
@@ -42,10 +47,44 @@ def drop_column_if_exists(engine, table, column):
     return True
 
 
+#: Recipient keys that used to be copied into metadata next to `recipients`.
+REDUNDANT_RECIPIENT_KEYS = ('to', 'cc', 'delivered_to', 'original_to')
+
+
+def strip_redundant_recipient_keys(engine):
+    """Remove duplicated recipient fields from email metadata (idempotent).
+
+    `recipients` (the normalised list) is what filtering and display read; the
+    raw headers were a second copy of the same fact. The readable To line stays
+    in `content`, so nothing user-visible is lost.
+    """
+    with engine.connect() as conn:
+        # json_remove() is a no-op for keys that are absent, so the WHERE clause
+        # is only there to skip rows that would not change — it keeps this from
+        # rewriting every email on every deploy.
+        predicates = ' OR '.join(
+            "json_extract(message_metadata, '$.%s') IS NOT NULL" % key
+            for key in REDUNDANT_RECIPIENT_KEYS)
+        args = ', '.join("'$.%s'" % key for key in REDUNDANT_RECIPIENT_KEYS)
+        result = conn.execute(text(
+            "UPDATE messages "
+            "SET message_metadata = json_remove(message_metadata, %s) "
+            "WHERE type = 'EMAIL' AND message_metadata IS NOT NULL AND (%s)"
+            % (args, predicates)))
+        conn.commit()
+        if result.rowcount:
+            print('migrate: stripped redundant recipient keys from %d email row(s)'
+                  % result.rowcount)
+        else:
+            print('migrate: email metadata already has no redundant recipient keys')
+        return result.rowcount
+
+
 def run_all():
     engine = _engine()
     print(f"migrate: engine = {engine.url.render_as_string(hide_password=True)}")
     drop_column_if_exists(engine, 'messages', 'is_read')
+    strip_redundant_recipient_keys(engine)
     print("migrate: done")
 
 

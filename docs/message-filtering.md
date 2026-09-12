@@ -101,6 +101,45 @@ EXISTS (SELECT 1 FROM json_each(messages.message_metadata, '$.recipients')
 JSON1 需要 SQLite ≥ 3.38（服务器实测 3.46.1；本机 3.37.0 也带 JSON1）。
 `list_recipients()`（下拉框选项）在 JSON1 缺失时返回空列表，不让整个页面挂掉。
 
+## 设计取舍：「对端」为什么暂时还留在 JSON 里（2026-09-12 决定）
+
+现状盘点（线上真实数据）——三个渠道各有一套不重叠的键：
+
+| 渠道 | metadata 键 |
+|---|---|
+| PUSH_NOTIFICATION（1735 行） | `package_name` / `app_name` / `notification_id` / `timestamp` / `source` / `title` |
+| SMS（63 行） | `phone_number` / `contact_name` / `timestamp` / `source` / `message_id` |
+| EMAIL（4 行） | `mailbox` / `message_id` / `subject` / `recipients` |
+
+看起来像"每个渠道一套字段"，但把它们翻译成**角色**后其实只有一套：谁发的（`sender` 列）、
+发给谁（**目前缺一等公民**）、在哪发生的（`source_device_id` 列）、什么类型（`type` 列）、
+什么时候（`timestamp` 列）；剩下的 `message_id`/`notification_id`/`package_name`/`delivered_to`
+是渠道细节，只用于去重和留档，不参与筛选。原则：**渠道不进 schema，角色才进。**
+
+"发给谁"是所有渠道共有的维度（邮件 `To`、短信是收到的号码、群聊是群名），现在被邮件独占，
+这是已知的味道。
+
+**评估过的方案**：`message_participants(message_id, role, address, name)` 子表，
+`role ∈ {from,to,cc,bcc}`，索引 `(address, role)`，由 hub 在**入库时统一派生**
+（`derive_participants(type, sender, metadata)`）——客户端不用改，新渠道只加一个映射分支，
+白送"按对端筛选"（含现在完全缺失的按发件人筛选）。
+
+**决定：暂不做**，等第二个非邮件来源真的接进来再上。理由是现在只有邮件有对端，
+此时建表是为想象中的第二个渠道设计 schema（YAGNI）。代价要记住：
+
+- JSON 多值数组**没法建索引**（表达式索引只能索引单个标量路径，数组要么每个位置一个索引，
+  要么 `json_each` 全表扫），所以 `recipient` 筛选是线性扫描。1,802 行无感，
+  但按 207 条/天算，一年 ~7.5 万行后会开始变成几十到上百毫秒并线性增长——这是 JSON 方案的硬天花板，
+  不是调参能解决的；
+- 那之后要回填的数据比现在多（回填来源是 `sender` + metadata，或按 `Message-ID` 回邮箱重取头，
+  `scripts/backfill-mail-recipients.py` 已经是这个套路，可复用）；
+- 期间筛选维度仍带邮件色彩（下拉框叫 "Received at (To)"）。
+
+**本次已做的清理**：metadata 里原来同时存 `recipients`（规范化）和 `to`/`cc`/`delivered_to`/
+`original_to`（原始头），是同一个事实的两份机读副本。既然暂时靠 JSON 承载查询，
+`recipients` 就是那个唯一真相来源，原始头不再进 metadata（可读版本仍在 `content` 的 `To:` 行）。
+`migrate.py` 幂等清掉老数据里的这几个键。
+
 ## 验证记录（2026-09-12）
 
 - 本机功能测试（临时 SQLite，不碰真实数据）：筛选 6 例、API 5 例、

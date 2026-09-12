@@ -395,7 +395,16 @@ def parse_message(raw):
 
 
 def build_payload(parsed, label):
-    """Build the MH POST /api/v1/messages payload from a parsed mail."""
+    """Build the MH POST /api/v1/messages payload from a parsed mail.
+
+    Stored metadata carries exactly one recipient key, ``recipients`` — the
+    normalised, lowercased address list that filtering and display both read.
+    The raw To/Cc/Delivered-To headers are deliberately *not* duplicated into
+    metadata: the human-readable To line already lives in ``content``, and
+    keeping a second machine-readable copy would give two sources of truth for
+    the same fact. parse_message still returns them for callers that need the
+    originals (the content line below, and future role-aware work).
+    """
     content = 'Subject: {subject}\nFrom: {sender}\nTo: {to}\nDate: {date}\n\n{body}'.format(
         subject=parsed['subject'] or '(no subject)',
         sender=parsed['sender'],
@@ -409,10 +418,6 @@ def build_payload(parsed, label):
         'message_id': parsed['message_id'],
         'subject': parsed['subject'],
     }
-    # Recipient bookkeeping — empty values are omitted so the JSON stays small.
-    for key in ('to', 'cc', 'original_to', 'delivered_to'):
-        if parsed.get(key):
-            metadata[key] = parsed[key]
     if parsed.get('recipients'):
         metadata['recipients'] = parsed['recipients']
     return {

@@ -115,9 +115,7 @@ def main():
 
                     print('  + %s  -> %s' % (message_id[:48], ', '.join(fields['recipients'])))
                     if args.apply:
-                        for key in ('to', 'cc', 'original_to', 'delivered_to'):
-                            if fields.get(key):
-                                meta[key] = fields[key]
+                        # Only the normalised list is stored — see build_payload().
                         meta['recipients'] = fields['recipients']
                         row.message_metadata = meta
                         row.content = add_to_header_line(row.content, fields['to'])

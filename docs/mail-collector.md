@@ -33,9 +33,7 @@ Message Hub 只做纯收集层，InfoAgent 等下游从 MH 的 API 消费邮件�
        "mailbox": "<label>",
        "message_id": "<Message-ID>",
        "subject": "...",
-       "to": "Xiao J <jxitc@hotmail.com>",
-       "recipients": ["jxitc@hotmail.com"],
-       "delivered_to": "jiangxjx@gmail.com"
+       "recipients": ["jxitc@hotmail.com"]
      }
    }
    ```
@@ -56,12 +54,15 @@ Message Hub 只做纯收集层，InfoAgent 等下游从 MH 的 API 消费邮件�
 | `X-Original-To` / `Envelope-To` | 投递链上的信封收件人（不是所有服务商都加） | ✅ 有则优先参考 |
 | `Return-Path` | 退信地址里常含原信箱（`bounces+...-jxitc=hotmail.com@...`） | ⚠️ 仅作交叉验证 |
 
-因此收集器保存：
+存储上**只有一份机读值**：
 
 - `metadata.recipients`：`To` + `Cc` 里所有地址（**小写去重**，保留首次出现的写法）——
-  这是筛选与删除实际用的字段；
-- `metadata.to` / `metadata.cc` / `metadata.delivered_to` / `metadata.original_to`：原始头，留档用；
-- `content` 头部多一行 `To: ...`，让 CLI / 下游（InfoAgent）不用解 metadata 就能看到收件人。
+  筛选、删除、列表显示都读它，是"收件人"这件事的**唯一真相来源**；
+- `content` 头部多一行 `To: ...`：人可读的原始头（CLI / 下游 InfoAgent 不用解 metadata）；
+- 原始 `to` / `cc` / `delivered_to` / `original_to` **不再写进 metadata**。曾经写进去过，
+  但那是同一个事实的第二份机读副本——两个真相来源迟早漂移。`parse_message()` 仍然返回它们
+  （渲染 `content` 那行要用，将来区分 To/Cc 角色也能用），只是不进 metadata。
+  `migrate.py` 在部署时把老行里的这几个键清掉（幂等）。
 
 ### 回填历史邮件
 

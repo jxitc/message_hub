@@ -209,3 +209,29 @@ Time:...`），显示层又要剥一遍，冗余不正式。
 - `docs/mail-collector.md` 同步修正漂移：补 `To:` 与 recipients 元数据、新增
   「收件人识别」与「增量模式 `--since-days`」小节（此前文档仍写着"UNSEEN 并把邮件标已读"，
   且把 UID 增量列为"未实现"）、网页版配置来源优先级、回填脚本、路径修正 `jxitc` → `xiao`。
+## 2026-09-12（追加：去掉重复的收件人字段 + 记录"对端维度"的取舍）
+
+- **背景**：用户质疑"是不是又加新字段了？以后来一个渠道就加一套字段，不 scalable"。
+  澄清：本次**没动 DB schema**（`messages` 仍 10 列），`recipients` 是写进 `message_metadata`
+  JSON 的键。但质疑成立的地方在于筛选维度带渠道色彩（下拉框叫 "Received at (To)"，只有邮件有）。
+- **现状盘点**（线上真实数据）：PUSH_NOTIFICATION 1735 行 / SMS 63 行 / EMAIL 4 行，
+  三套不重叠的 metadata 键。翻译成"角色"后其实只有一套：谁发的（`sender` 列）、发给谁
+  （**缺一等公民**）、在哪发生的（`source_device_id` 列）、什么类型（`type` 列）、何时（`timestamp` 列）；
+  `message_id`/`notification_id`/`package_name`/`delivered_to` 属渠道细节，只用于去重与留档。
+  原则：**渠道不进 schema，角色才进**。
+- **评估了 `message_participants(message_id, role, address, name)` 子表方案**
+  （role ∈ from/to/cc/bcc，索引 (address, role)，由 hub 入库时统一派生 → 客户端不改、
+  新渠道只加映射分支、白送按对端/发件人筛选）。
+  **决定暂不做，等第二个非邮件来源真接进来再上**（现在只有邮件有对端，此时建表是为想象中的
+  渠道设计 schema）。已把理由与代价写进 `docs/message-filtering.md`：JSON 多值数组无法建索引
+  （`json_each` 全表扫），1,802 行无感但一年 ~7.5 万行后线性变慢，以及后续回填量更大。
+- **本次实际清理**（消除"两个真相来源"）：metadata 里原本同时存 `recipients`（规范化数组）与
+  `to`/`cc`/`delivered_to`/`original_to`（原始头）。既然查询暂时仍靠 JSON，
+  `recipients` 就是唯一真相来源，原始头不再进 metadata；其可读版本仍在 `content` 的 `To:` 行，
+  下游没损失。`parse_message()` 仍返回这些原始头（渲染 content、将来区分 To/Cc 角色可用），
+  只是 `build_payload()` 不再写进 metadata。
+- **迁移**：`migrate.py` 新增 `strip_redundant_recipient_keys()`，用 `json_remove` 幂等清掉老行里的
+  这 4 个键（只动 `type='EMAIL'`，其他渠道的 `to` 等键不受影响）。随 deploy 自动执行。
+- **验证**：pytest 41 例全过（新增 `tests/test_migrate.py` 3 例：只删重复键且保留 `recipients`、
+  幂等、不动其他渠道；`test_mail_recipients.py` 增断言 metadata 恰好只有 4 个键）。
+
