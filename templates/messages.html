@@ -13,9 +13,10 @@
                 <p class="text-muted">View and manage your messages</p>
             </div>
             <div>
-                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse" 
-                        data-bs-target="#filterCollapse" aria-expanded="false">
+                <button class="btn btn-outline-secondary" type="button" data-bs-toggle="collapse"
+                        data-bs-target="#filterCollapse" aria-expanded="{{ 'true' if has_filters else 'false' }}">
                     <i class="bi bi-funnel"></i> Filters
+                    {% if has_filters %}<span class="badge bg-primary ms-1">{{ active_filter_count }}</span>{% endif %}
                 </button>
             </div>
         </div>
@@ -23,38 +24,66 @@
 </div>
 
 <!-- Filter Form -->
-<div class="collapse mb-4" id="filterCollapse">
+<div class="collapse {{ 'show' if has_filters else '' }} mb-4" id="filterCollapse">
     <div class="card filter-form">
         <div class="card-body">
-            <form id="filter-form" method="GET">
+            <form id="filter-form" method="GET" action="{{ url_for('web.messages') }}">
                 <div class="row g-3">
-                    <div class="col-md-3">
+                    <div class="col-md-2">
                         <label for="type" class="form-label">Message Type</label>
                         <select name="type" id="type" class="form-select">
                             <option value="">All Types</option>
                             {% for msg_type in message_types %}
-                            <option value="{{ msg_type }}" 
+                            <option value="{{ msg_type }}"
                                     {% if current_filters.type == msg_type %}selected{% endif %}>
                                 {{ msg_type.replace('_', ' ').title() }}
                             </option>
                             {% endfor %}
                         </select>
                     </div>
-                    
-                    <div class="col-md-3">
+
+                    <div class="col-md-2">
                         <label for="device" class="form-label">Device</label>
                         <select name="device" id="device" class="form-select">
                             <option value="">All Devices</option>
                             {% for device in devices %}
-                            <option value="{{ device }}" 
+                            <option value="{{ device }}"
                                     {% if current_filters.device == device %}selected{% endif %}>
                                 {{ device or 'Unknown Device' }}
                             </option>
                             {% endfor %}
                         </select>
                     </div>
-                    
-                    <div class="col-md-3">
+
+                    <div class="col-md-2">
+                        <label for="recipient" class="form-label">Received at (To)</label>
+                        <select name="recipient" id="recipient" class="form-select">
+                            <option value="">Any recipient</option>
+                            {% for addr in recipients %}
+                            <option value="{{ addr }}"
+                                    {% if current_filters.recipient|lower == addr %}selected{% endif %}>
+                                {{ addr }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                        {% if not recipients %}
+                        <div class="form-text">Email only — none collected yet.</div>
+                        {% endif %}
+                    </div>
+
+                    <div class="col-md-2">
+                        <label for="since" class="form-label">From date</label>
+                        <input type="date" name="since" id="since" class="form-control"
+                               value="{{ current_filters.since }}">
+                    </div>
+
+                    <div class="col-md-2">
+                        <label for="until" class="form-label">To date</label>
+                        <input type="date" name="until" id="until" class="form-control"
+                               value="{{ current_filters.until }}">
+                    </div>
+
+                    <div class="col-md-1">
                         <label for="limit" class="form-label">Per Page</label>
                         <select name="limit" id="limit" class="form-select">
                             <option value="10" {% if current_filters.limit == 10 %}selected{% endif %}>10</option>
@@ -63,17 +92,22 @@
                             <option value="100" {% if current_filters.limit == 100 %}selected{% endif %}>100</option>
                         </select>
                     </div>
-                    
-                    <div class="col-md-3">
-                        <div class="d-flex gap-2 mt-4">
-                            <button type="submit" class="btn btn-primary flex-fill">
+
+                    <div class="col-md-1">
+                        <label class="form-label d-none d-md-block">&nbsp;</label>
+                        <div class="d-flex gap-2">
+                            <button type="submit" class="btn btn-primary flex-fill" title="Apply filters">
                                 <i class="bi bi-search"></i>
                             </button>
-                            <button type="button" class="btn btn-outline-secondary" id="clear-filters">
+                            <a href="{{ url_for('web.messages') }}" class="btn btn-outline-secondary" title="Clear filters">
                                 <i class="bi bi-x"></i>
-                            </button>
+                            </a>
                         </div>
                     </div>
+                </div>
+                <div class="form-text mt-2">
+                    <i class="bi bi-info-circle"></i>
+                    Dates are your local days; the range matches when each message happened.
                 </div>
             </form>
         </div>
@@ -84,100 +118,155 @@
 <div class="row">
     <div class="col-12">
         {% if messages %}
-            <!-- Pagination Info -->
-            {% if pagination %}
-            <div class="d-flex justify-content-between align-items-center mb-3">
-                <small class="text-muted">
-                    Showing {{ ((pagination.page - 1) * pagination.per_page) + 1 }} to 
-                    {{ page_end }} of 
-                    {{ pagination.total }} messages
-                </small>
-                
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="auto-refresh">
-                    <label class="form-check-label small" for="auto-refresh">
-                        Auto-refresh
-                    </label>
+            <!--
+              A single form wraps the list so ticking rows and deleting them is
+              one submit. "Delete all matching" is the same submit pointed at a
+              different route via formaction, with confirm=yes enabled by JS —
+              a no-JS client can only take the safe path.
+            -->
+            <form id="bulk-form" method="POST" action="{{ url_for('web.delete_messages') }}">
+                {% for key, value in current_filters.items() %}
+                <input type="hidden" name="{{ key }}" value="{{ value }}">
+                {% endfor %}
+                <input type="hidden" name="since_utc" id="echo-since-utc" value="">
+                <input type="hidden" name="until_utc" id="echo-until-utc" value="">
+                <input type="hidden" name="confirm" id="confirm-flag" value="" disabled>
+
+                <!-- Pagination Info / Bulk Actions -->
+                {% if pagination %}
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                    <small class="text-muted">
+                        Showing {{ ((pagination.page - 1) * pagination.per_page) + 1 }} to
+                        {{ page_end }} of
+                        {{ pagination.total }} messages
+                        {% if has_filters %}<span class="ms-2">(filtered: {{ filter_summary }})</span>{% endif %}
+                    </small>
+
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="small text-muted" id="selection-count">0 selected</span>
+                        <button type="submit" class="btn btn-sm btn-outline-danger" id="btn-delete-selected" disabled>
+                            <i class="bi bi-trash"></i> Delete selected
+                        </button>
+                        {% if has_filters %}
+                        <button type="submit" class="btn btn-sm btn-danger"
+                                id="btn-delete-filtered"
+                                formaction="{{ url_for('web.delete_messages_filtered') }}"
+                                data-total="{{ pagination.total }}"
+                                data-summary="{{ filter_summary }}">
+                            <i class="bi bi-trash3"></i> Delete all {{ pagination.total }} matching
+                        </button>
+                        {% endif %}
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="auto-refresh">
+                            <label class="form-check-label small" for="auto-refresh">
+                                Auto-refresh
+                            </label>
+                        </div>
+                    </div>
                 </div>
-            </div>
-            {% endif %}
-            
-            <!-- Message Cards -->
-            <div class="row">
-                {% for message in messages %}
-                <div class="col-12 mb-3">
-                    <div class="card message-card">
-                        <div class="card-body">
-                            <div class="row align-items-center">
-                                <div class="col-md-8">
-                                    <div class="d-flex align-items-center mb-2">
-                                        <!-- Message Type Icon -->
-                                        <div class="me-3">
-                                            {% if message.type == 'SMS' %}
-                                                <i class="bi bi-chat-text text-primary fs-5"></i>
-                                            {% elif message.type == 'PUSH_NOTIFICATION' %}
-                                                <i class="bi bi-bell text-warning fs-5"></i>
-                                            {% elif message.type == 'EMAIL' %}
-                                                <i class="bi bi-envelope text-info fs-5"></i>
-                                            {% elif message.type == 'CALL_LOG' %}
-                                                <i class="bi bi-telephone text-success fs-5"></i>
-                                            {% else %}
-                                                <i class="bi bi-question-circle text-secondary fs-5"></i>
-                                            {% endif %}
+                {% endif %}
+
+                <!-- Message Cards -->
+                <div class="row">
+                    <div class="col-12 mb-2">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="select-all">
+                            <label class="form-check-label small text-muted" for="select-all">
+                                Select all on this page
+                            </label>
+                        </div>
+                    </div>
+                    {% for message in messages %}
+                    <div class="col-12 mb-3">
+                        <div class="card message-card">
+                            <div class="card-body">
+                                <div class="row align-items-center">
+                                    <div class="col-auto">
+                                        <div class="form-check">
+                                            <input class="form-check-input msg-check" type="checkbox"
+                                                   name="ids" value="{{ message.id }}"
+                                                   id="pick-{{ message.id }}"
+                                                   aria-label="Select message">
                                         </div>
-                                        
-                                        <!-- Sender and Type -->
-                                        <div>
-                                            <h6 class="mb-0">{{ message.sender or 'Unknown Sender' }}</h6>
+                                    </div>
+                                    <div class="col-md-7">
+                                        <div class="d-flex align-items-center mb-2">
+                                            <!-- Message Type Icon -->
+                                            <div class="me-3">
+                                                {% if message.type == 'SMS' %}
+                                                    <i class="bi bi-chat-text text-primary fs-5"></i>
+                                                {% elif message.type == 'PUSH_NOTIFICATION' %}
+                                                    <i class="bi bi-bell text-warning fs-5"></i>
+                                                {% elif message.type == 'EMAIL' %}
+                                                    <i class="bi bi-envelope text-info fs-5"></i>
+                                                {% elif message.type == 'CALL_LOG' %}
+                                                    <i class="bi bi-telephone text-success fs-5"></i>
+                                                {% else %}
+                                                    <i class="bi bi-question-circle text-secondary fs-5"></i>
+                                                {% endif %}
+                                            </div>
+
+                                            <!-- Sender and Type -->
+                                            <div>
+                                                <h6 class="mb-0">{{ message.sender or 'Unknown Sender' }}</h6>
+                                                <small class="text-muted">
+                                                    <span class="badge bg-secondary message-type-badge">
+                                                        {{ message.type.replace('_', ' ').title() }}
+                                                    </span>
+                                                </small>
+                                            </div>
+                                        </div>
+
+                                        <!-- Message Content -->
+                                        <div class="message-content">
+                                            <p class="mb-1">{{ message.content or 'No content' }}</p>
+                                        </div>
+
+                                        <!-- Message Metadata -->
+                                        <div class="message-meta">
                                             <small class="text-muted">
-                                                <span class="badge bg-secondary message-type-badge">
-                                                    {{ message.type.replace('_', ' ').title() }}
+                                                <i class="bi bi-clock"></i>
+                                                <span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="datetime">{{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else 'Unknown' }}</span>
+
+                                                <span class="ms-3">
+                                                    <i class="bi bi-device-ssd"></i>
+                                                    {{ message.source_device_id or 'Unknown Device' }}
+                                                </span>
+
+                                                {% set rcpts = (message.message_metadata or {}).get('recipients') %}
+                                                {% if rcpts %}
+                                                <span class="ms-3">
+                                                    <i class="bi bi-send"></i>
+                                                    to {{ rcpts|join(', ') }}
+                                                </span>
+                                                {% endif %}
+
+                                                <span class="ms-3">
+                                                    <i class="bi bi-hash"></i>
+                                                    {{ message.id[:8] }}...
                                                 </span>
                                             </small>
                                         </div>
                                     </div>
-                                    
-                                    <!-- Message Content -->
-                                    <div class="message-content">
-                                        <p class="mb-1">{{ message.content or 'No content' }}</p>
-                                    </div>
-                                    
-                                    <!-- Message Metadata -->
-                                    <div class="message-meta">
-                                        <small class="text-muted">
-                                            <i class="bi bi-clock"></i>
-                                            <span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="datetime">{{ message.timestamp.strftime('%Y-%m-%d %H:%M:%S') if message.timestamp else 'Unknown' }}</span>
-                                            
-                                            <span class="ms-3">
-                                                <i class="bi bi-device-ssd"></i>
-                                                {{ message.source_device_id or 'Unknown Device' }}
-                                            </span>
-                                            
-                                            <span class="ms-3">
-                                                <i class="bi bi-hash"></i>
-                                                {{ message.id[:8] }}...
-                                            </span>
-                                        </small>
-                                    </div>
-                                </div>
-                                
-                                <!-- Action Buttons -->
-                                <div class="col-md-4 text-end">
-                                    <div class="btn-group" role="group">
-                                        <a href="{{ url_for('web.message_detail', message_id=message.id) }}" 
-                                           class="btn btn-outline-primary btn-sm"
-                                           data-bs-toggle="tooltip" title="View Details">
-                                            <i class="bi bi-eye"></i>
-                                        </a>
+
+                                    <!-- Action Buttons -->
+                                    <div class="col-md-4 text-end">
+                                        <div class="btn-group" role="group">
+                                            <a href="{{ url_for('web.message_detail', message_id=message.id) }}"
+                                               class="btn btn-outline-primary btn-sm"
+                                               data-bs-toggle="tooltip" title="View Details">
+                                                <i class="bi bi-eye"></i>
+                                            </a>
+                                        </div>
                                     </div>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    {% endfor %}
                 </div>
-                {% endfor %}
-            </div>
-            
+            </form>
+
             <!-- Pagination -->
             {% if pagination and pagination.pages > 1 %}
             <nav aria-label="Message pagination">
@@ -189,7 +278,7 @@
                         </a>
                     </li>
                     {% endif %}
-                    
+
                     {% for page_num in pagination.iter_pages() %}
                         {% if page_num %}
                             {% if page_num != pagination.page %}
@@ -207,7 +296,7 @@
                         </li>
                         {% endif %}
                     {% endfor %}
-                    
+
                     {% if pagination.has_next %}
                     <li class="page-item">
                         <a class="page-link" href="{{ page_href(pagination.next_num) }}">
@@ -218,7 +307,7 @@
                 </ul>
             </nav>
             {% endif %}
-            
+
         {% else %}
             <!-- Empty State -->
             <div class="card">
@@ -226,16 +315,16 @@
                     <i class="bi bi-inbox fs-1 text-muted d-block mb-3"></i>
                     <h5>No Messages Found</h5>
                     <p class="text-muted">
-                        {% if current_filters.type or current_filters.device %}
+                        {% if has_filters %}
                             No messages match your current filters. Try adjusting your search criteria.
                         {% else %}
                             No messages have been received yet. Make sure your devices are configured to forward messages.
                         {% endif %}
                     </p>
-                    {% if current_filters.type or current_filters.device %}
-                    <button type="button" class="btn btn-outline-primary" id="clear-filters">
+                    {% if has_filters %}
+                    <a href="{{ url_for('web.messages') }}" class="btn btn-outline-primary">
                         <i class="bi bi-x-circle"></i> Clear Filters
-                    </button>
+                    </a>
                     {% endif %}
                 </div>
             </div>
@@ -248,34 +337,134 @@
 <script>
 // Messages page specific JavaScript
 document.addEventListener('DOMContentLoaded', function() {
-    // Initialize messages page
     initMessagesPage();
 });
 
 function initMessagesPage() {
     // Load messages function for auto-refresh
     window.loadMessages = function() {
-        // Build current URL with filters
         const form = document.getElementById('filter-form');
         if (!form) return;
         const formData = new FormData(form);
         const params = new URLSearchParams();
-        
+
         for (let [key, value] of formData.entries()) {
             if (value) params.append(key, value);
         }
-        
+
         // Reload with current filters (back to page 1)
         window.location.search = params.toString();
     };
-    
-    // Clear filters functionality
-    const clearBtn = document.getElementById('clear-filters');
-    if (clearBtn) {
-        clearBtn.addEventListener('click', function() {
-            window.location.href = window.location.pathname;
+
+    // --- Local-day boundaries -------------------------------------------
+    // <input type="date"> has no timezone: the server would read "2026-09-01"
+    // as a UTC day while the user means their own. Convert here, where the
+    // browser's timezone is known, and send full instants alongside the dates.
+    function localDayInstants(sinceEl, untilEl) {
+        const out = {since: '', until: ''};
+        if (sinceEl && sinceEl.value) {
+            out.since = new Date(sinceEl.value + 'T00:00:00').toISOString();
+        }
+        if (untilEl && untilEl.value) {
+            out.until = new Date(untilEl.value + 'T23:59:59.999').toISOString();
+        }
+        return out;
+    }
+
+    const filterForm = document.getElementById('filter-form');
+    if (filterForm) {
+        filterForm.addEventListener('submit', function() {
+            const instants = localDayInstants(
+                document.getElementById('since'), document.getElementById('until'));
+            [['since', instants.since], ['until', instants.until]].forEach(function(pair) {
+                if (!pair[1]) return;
+                let hidden = filterForm.querySelector('input[name="' + pair[0] + '_utc"]');
+                if (!hidden) {
+                    hidden = document.createElement('input');
+                    hidden.type = 'hidden';
+                    hidden.name = pair[0] + '_utc';
+                    filterForm.appendChild(hidden);
+                }
+                hidden.value = pair[1];
+            });
         });
     }
+
+    // --- Bulk selection --------------------------------------------------
+    const bulkForm = document.getElementById('bulk-form');
+    if (bulkForm) {
+        const checks = Array.prototype.slice.call(bulkForm.querySelectorAll('.msg-check'));
+        const selectAll = document.getElementById('select-all');
+        const counter = document.getElementById('selection-count');
+        const btnSelected = document.getElementById('btn-delete-selected');
+        const btnFiltered = document.getElementById('btn-delete-filtered');
+
+        function refreshSelection() {
+            const picked = checks.filter(function(c) { return c.checked; });
+            if (counter) {
+                counter.textContent = picked.length + ' selected';
+                counter.classList.toggle('text-danger', picked.length > 0);
+            }
+            if (btnSelected) btnSelected.disabled = picked.length === 0;
+            if (selectAll) {
+                selectAll.checked = picked.length > 0 && picked.length === checks.length;
+                selectAll.indeterminate = picked.length > 0 && picked.length < checks.length;
+            }
+        }
+
+        checks.forEach(function(c) { c.addEventListener('change', refreshSelection); });
+
+        if (selectAll) {
+            selectAll.addEventListener('change', function() {
+                checks.forEach(function(c) { c.checked = selectAll.checked; });
+                refreshSelection();
+            });
+        }
+
+        // Keep the echoed instants in step with the visible date fields, so the
+        // redirect after a delete rebuilds the same filter the user was on.
+        const echoSince = document.getElementById('echo-since-utc');
+        const echoUntil = document.getElementById('echo-until-utc');
+        const instants = localDayInstants(
+            document.getElementById('since'), document.getElementById('until'));
+        if (echoSince) echoSince.value = instants.since;
+        if (echoUntil) echoUntil.value = instants.until;
+
+        bulkForm.addEventListener('submit', function(event) {
+            const viaFiltered = event.submitter && event.submitter === btnFiltered;
+
+            if (viaFiltered) {
+                // Deleting every match cannot be undone — make the user read
+                // the count and the filter summary before it happens.
+                const total = btnFiltered.getAttribute('data-total');
+                const summary = btnFiltered.getAttribute('data-summary');
+                const ok = window.confirm(
+                    'Delete all ' + total + ' messages matching [' + summary + ']?\n\n' +
+                    'This cannot be undone. Only messages matching the current filters are removed.');
+                if (!ok) {
+                    event.preventDefault();
+                    return;
+                }
+                const flag = document.getElementById('confirm-flag');
+                flag.disabled = false;
+                flag.value = 'yes';
+                return;
+            }
+
+            const picked = checks.filter(function(c) { return c.checked; });
+            if (picked.length === 0) {
+                event.preventDefault();
+                window.alert('Tick at least one message first.');
+                return;
+            }
+            if (!window.confirm('Delete ' + picked.length + ' selected message(s)? This cannot be undone.')) {
+                event.preventDefault();
+            }
+        });
+
+        refreshSelection();
+    }
+
     // Note: pagination links are plain <a href> (see page_href) — no JS needed.
 }
 </script>

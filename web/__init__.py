@@ -22,8 +22,8 @@ def _utc_iso(value):
 
 def _page_href(page):
     """Build a messages-page URL for the given page number, preserving the
-    current query params (type/device/unread/limit). Lets pagination links be
-    plain <a href> — no JS interception needed."""
+    current query params (type/device/recipient/since/until/limit). Lets
+    pagination links be plain <a href> — no JS interception needed."""
     args = {k: v for k, v in request.args.items() if v != ''}
     args['page'] = page
     return url_for('web.messages', **args)

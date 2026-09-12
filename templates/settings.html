@@ -1,6 +1,27 @@
 {% extends "base.html" %}
 
-{% block title %}Settings - Message Hub{% endblock %}
+{% block title %}Settings - Message Hub
+<script>
+async function testMailAccount() {
+    const form = document.getElementById('mail-form');
+    const out = document.getElementById('mail-test-result');
+    out.className = 'small align-self-center text-muted';
+    out.textContent = '测试中…（最多 30 秒）';
+    try {
+        const resp = await fetch('{{ url_for("web.test_mail_account") }}', {
+            method: 'POST',
+            body: new FormData(form)
+        });
+        const data = await resp.json();
+        out.className = 'small align-self-center ' + (data.ok ? 'text-success' : 'text-danger');
+        out.textContent = (data.ok ? '✅ ' : '❌ ') + data.message;
+    } catch (e) {
+        out.className = 'small align-self-center text-danger';
+        out.textContent = '❌ ' + e;
+    }
+}
+</script>
+{% endblock %}
 
 {% block content %}
 <div class="row mb-4">
@@ -9,6 +30,101 @@
             <i class="bi bi-gear"></i> Settings
         </h1>
         <p class="text-muted">API key management — keys are used by the phone app, CLI and API clients.</p>
+    </div>
+</div>
+
+<!-- Mail (IMAP) accounts -->
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-envelope-at"></i> Mail (IMAP)
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if mail_accounts %}
+                <p class="text-muted small">
+                    Collects the last {{ mail_since_days }} day(s) of mail on demand
+                    (Dashboard → Import Email) and hourly in the background.
+                    Your mailbox's read/unread state is never changed.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead><tr><th>Label</th><th>Address</th><th>Server</th><th>Password</th><th></th></tr></thead>
+                        <tbody>
+                            {% for m in mail_accounts %}
+                            <tr>
+                                <td>{{ m.label }}</td>
+                                <td>{{ m.user }}</td>
+                                <td><code>{{ m.host }}:{{ m.port }}</code> / {{ m.folder }}</td>
+                                <td>{% if m.has_password %}<span class="badge bg-success">set</span>{% else %}<span class="badge bg-danger">missing</span>{% endif %}</td>
+                                <td class="text-end">
+                                    <form method="POST" action="{{ url_for('web.delete_mail_account', index=loop.index0) }}"
+                                          onsubmit="return confirm('Remove mailbox {{ m.user }}?');">
+                                        <button type="submit" class="btn btn-outline-danger btn-sm">
+                                            <i class="bi bi-trash"></i> Remove
+                                        </button>
+                                    </form>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted small mb-3">
+                    No mailbox configured yet. Add one below — the password is written straight to
+                    <code>instance/mail_accounts.json</code> on this server (mode 600, never in git).
+                </p>
+                {% endif %}
+
+                <form method="POST" action="{{ url_for('web.save_mail_account') }}"
+                      id="mail-form" class="row g-2 align-items-end">
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1" for="mail-user">Mailbox address</label>
+                        <input class="form-control form-control-sm" id="mail-user" name="user"
+                               placeholder="you@gmail.com" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1" for="mail-pass">App password</label>
+                        <input class="form-control form-control-sm" id="mail-pass" name="password"
+                               type="password" autocomplete="new-password"
+                               placeholder="16 位应用专用密码">
+                        <div class="form-text">Gmail 需"应用专用密码"，不是登录密码</div>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label small mb-1" for="mail-host">IMAP server</label>
+                        <input class="form-control form-control-sm" id="mail-host" name="host"
+                               value="imap.gmail.com" required>
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label small mb-1" for="mail-port">Port</label>
+                        <input class="form-control form-control-sm" id="mail-port" name="port" value="993">
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label small mb-1" for="mail-days">Days</label>
+                        <input class="form-control form-control-sm" id="mail-days" name="since_days"
+                               value="{{ mail_since_days }}">
+                    </div>
+                    <div class="col-md-1">
+                        <label class="form-label small mb-1" for="mail-label">Label</label>
+                        <input class="form-control form-control-sm" id="mail-label" name="label" placeholder="main">
+                    </div>
+                    <div class="col-md-1 d-grid">
+                        <button type="button" class="btn btn-outline-secondary btn-sm" onclick="testMailAccount()">
+                            Test
+                        </button>
+                    </div>
+                    <div class="col-12 d-grid d-md-flex gap-2 mt-2">
+                        <button type="submit" class="btn btn-primary btn-sm">
+                            <i class="bi bi-save"></i> Save mailbox
+                        </button>
+                        <span id="mail-test-result" class="small align-self-center"></span>
+                    </div>
+                </form>
+            </div>
+        </div>
     </div>
 </div>
 

@@ -8,6 +8,7 @@ import json
 import os
 import threading
 import time
+import message_filters as _mf
 
 # ---------------------------------------------------------------------------
 # Manual "Import Email" trigger (Dashboard button)
@@ -45,10 +46,10 @@ def _set_import_running(flag):
 @web.route('/import-email', methods=['POST'])
 def import_email():
     """Start a background mail collect. Body (JSON): {"since_days": N}."""
-    since_days = 1
+    since_days = _mc.configured_since_days() if '_mc' in globals() else 1
     body = request.get_json(silent=True) or {}
     try:
-        since_days = int(body.get('since_days', 1))
+        since_days = int(body.get('since_days', since_days))
     except (TypeError, ValueError):
         return jsonify({'error': 'since_days must be an integer'}), 400
     if since_days < 1:
@@ -148,7 +149,7 @@ def dashboard():
         return render_template('dashboard.html', 
                              stats=stats, 
                              recent_messages=recent_messages,
-                             import_days=1)
+                             import_days=_mc.configured_since_days())
     
     except Exception as e:
         flash(f'Error loading dashboard: {str(e)}', 'error')
@@ -162,16 +163,21 @@ def messages():
     per_page = int(request.args.get('limit', 20))
     message_type = request.args.get('type', '').strip()
     device = request.args.get('device', '').strip()
+    recipient = request.args.get('recipient', '').strip()
+    # The browser converts the user's local day boundaries into instants and
+    # sends since_utc/until_utc; bare dates are the fallback (read as UTC days).
+    since = request.args.get('since_utc', '').strip() or request.args.get('since', '').strip()
+    until = request.args.get('until_utc', '').strip() or request.args.get('until', '').strip()
     
     try:
-        # Build query
-        query = db.session.query(Message)
-        
-        # Apply filters (same logic as CLI)
-        if message_type:
-            query = query.filter(Message.type == message_type)
-        if device:
-            query = query.filter(Message.source_device_id == device)
+        # Build query — filtering lives in message_filters so that the rows
+        # shown here and the rows a "delete all matching" removes are identical.
+        query = _mf.apply_filters(db.session.query(Message),
+                                  message_type=message_type,
+                                  device=device,
+                                  recipient=recipient,
+                                  since=since,
+                                  until=until)
         
         # Order by timestamp (newest first)
         query = query.order_by(desc(Message.timestamp))
@@ -188,12 +194,14 @@ def messages():
         # Last item index to show (clamp on the final page)
         page_end = min(pagination.page * pagination.per_page, pagination.total)
         
-        # Get filter options
-        message_types = db.session.query(Message.type).distinct().all()
-        message_types = [t[0] for t in message_types if t[0]]
+        # Filter options
+        message_types = _mf.list_message_types()
+        devices = _mf.list_devices()
+        recipients = _mf.list_recipients()
         
-        devices = db.session.query(Message.source_device_id).distinct().all()
-        devices = [d[0] for d in devices if d[0]]
+        active = _mf.normalize_filters(message_type=message_type, device=device,
+                                       recipient=recipient, since=since, until=until)
+        filter_summary = _mf.describe_filters(active)
         
         return render_template('messages.html',
                              messages=messages,
@@ -201,9 +209,16 @@ def messages():
                              page_end=page_end,
                              message_types=message_types,
                              devices=devices,
+                             recipients=recipients,
+                             has_filters=bool(filter_summary),
+                             active_filter_count=len([v for v in active.values() if v]),
+                             filter_summary=filter_summary,
                              current_filters={
                                  'type': message_type,
                                  'device': device,
+                                 'recipient': recipient,
+                                 'since': request.args.get('since', '').strip(),
+                                 'until': request.args.get('until', '').strip(),
                                  'limit': per_page
                              })
     
@@ -214,7 +229,98 @@ def messages():
                              pagination=None,
                              message_types=[],
                              devices=[],
+                             recipients=[],
+                             has_filters=False,
+                             active_filter_count=0,
+                             filter_summary='',
                              current_filters={})
+
+
+def _messages_redirect():
+    """Send the user back to the list they were looking at, filters intact."""
+    args = {}
+    for key in ('type', 'device', 'recipient', 'limit', 'page'):
+        value = request.form.get(key, '').strip()
+        if value:
+            args[key] = value
+    # Prefer the browser-computed instants: they encode the user's local day
+    # boundaries, which a bare date would lose (it would be re-read as UTC).
+    for key in ('since', 'until'):
+        instant = request.form.get(key + '_utc', '').strip()
+        bare = request.form.get(key, '').strip()
+        if instant:
+            args[key + '_utc'] = instant
+        if bare:
+            args[key] = bare
+    return redirect(url_for('web.messages', **args))
+
+
+@web.route('/messages/delete', methods=['POST'])
+def delete_messages():
+    """Delete the messages the user ticked.
+
+    Deliberately takes explicit ids rather than a filter: the count the user
+    saw in the confirm dialog is the count that disappears.
+    """
+    ids = [i.strip() for i in request.form.getlist('ids') if i.strip()]
+    if not ids:
+        flash('Nothing selected — tick the messages you want to delete first.', 'error')
+        return _messages_redirect()
+
+    try:
+        # Cap the IN clause: SQLite's default parameter limit makes huge
+        # selects fail outright, and a page never holds more than 100 anyway.
+        ids = ids[:1000]
+        deleted = db.session.query(Message).filter(Message.id.in_(ids)).delete(
+            synchronize_session=False)
+        db.session.commit()
+        flash('Deleted %d message%s.' % (deleted, '' if deleted == 1 else 's'), 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error('Delete messages failed: %s', e)
+        flash(f'Delete failed: {str(e)}', 'error')
+
+    return _messages_redirect()
+
+
+@web.route('/messages/delete-filtered', methods=['POST'])
+def delete_messages_filtered():
+    """Delete every message matching the current filters (not just this page).
+
+    This is the "clean up all 抖音 notifications from last month" path. It runs
+    through the same apply_filters() the list page used, so the total shown in
+    the confirm dialog is exactly what gets removed.
+    """
+    if request.form.get('confirm') != 'yes':
+        flash('Delete cancelled — confirmation was not provided.', 'error')
+        return _messages_redirect()
+
+    filters = _mf.normalize_filters(
+        message_type=request.form.get('type'),
+        device=request.form.get('device'),
+        recipient=request.form.get('recipient'),
+        since=request.form.get('since_utc') or request.form.get('since'),
+        until=request.form.get('until_utc') or request.form.get('until'),
+    )
+    if not any(filters.values()):
+        # No filters means "delete everything" — far too easy to click by
+        # accident, so it needs an explicit second signal.
+        flash('Refusing to delete: no filters selected (that would erase everything).', 'error')
+        return _messages_redirect()
+
+    try:
+        query = _mf.apply_filter_dict(db.session.query(Message), filters)
+        deleted = query.delete(synchronize_session=False)
+        db.session.commit()
+        summary = _mf.describe_filters(filters)
+        flash('Deleted %d message%s matching %s.' % (
+            deleted, '' if deleted == 1 else 's', summary), 'success')
+    except Exception as e:
+        db.session.rollback()
+        current_app.logger.error('Delete filtered messages failed: %s', e)
+        flash(f'Delete failed: {str(e)}', 'error')
+
+    return _messages_redirect()
 
 @web.route('/messages/<message_id>')
 def message_detail(message_id):
@@ -310,7 +416,9 @@ def settings():
     legacy_configured = bool((_app.config.get('API_KEY') or '').strip())
     return render_template('settings.html', keys=keys,
                            legacy_configured=legacy_configured,
-                           releases=_list_releases())
+                           releases=_list_releases(),
+                           mail_accounts=_mail_accounts_for_display(),
+                           mail_since_days=_mc.configured_since_days())
 
 
 @web.route('/settings/api-keys/generate', methods=['POST'])
@@ -412,3 +520,130 @@ def _list_releases():
             'mtime': _dt.fromtimestamp(st.st_mtime),
         })
     return sorted(out, key=lambda r: r['mtime'], reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Mail (IMAP) settings — managed from the web so the owner never has to SSH in
+# and the password never travels through anyone else.
+# Accounts live in instance/mail_accounts.json (0600, gitignored).
+# ---------------------------------------------------------------------------
+
+import mail_collector as _mc
+
+
+def _mail_accounts_for_display():
+    """Accounts with the password masked."""
+    out = []
+    for a in _mc.load_accounts_from_file():
+        out.append({
+            'host': a.get('host'), 'user': a.get('user'), 'label': a.get('label'),
+            'port': a.get('port'), 'folder': a.get('folder'),
+            'has_password': bool(a.get('password')),
+        })
+    return out
+
+
+@web.route('/settings/mail', methods=['POST'])
+def save_mail_account():
+    """Add or update one IMAP account."""
+    host = (request.form.get('host') or '').strip()
+    user = (request.form.get('user') or '').strip()
+    password = request.form.get('password') or ''
+    label = (request.form.get('label') or user).strip()
+    folder = (request.form.get('folder') or 'INBOX').strip()
+    original = (request.form.get('original_user') or '').strip()
+
+    try:
+        port = int(request.form.get('port') or 993)
+        since_days = max(1, int(request.form.get('since_days') or 1))
+    except ValueError:
+        flash('Port and days must be numbers', 'error')
+        return redirect(url_for('web.settings'))
+
+    if not host or not user:
+        flash('Host and mailbox address are required', 'error')
+        return redirect(url_for('web.settings'))
+
+    accounts = _mc.load_accounts_from_file()
+    existing = next((a for a in accounts if a.get('user') == (original or user)), None)
+
+    if existing is not None:
+        # keep the stored password when the field is left blank
+        existing.update({'host': host, 'user': user, 'label': label,
+                         'port': port, 'folder': folder, 'use_ssl': True})
+        if password:
+            existing['password'] = password
+        flash(f'Mailbox {user} updated', 'success')
+    else:
+        if not password:
+            flash('Password is required for a new mailbox', 'error')
+            return redirect(url_for('web.settings'))
+        accounts.append({'host': host, 'user': user, 'password': password,
+                         'port': port, 'use_ssl': True, 'folder': folder,
+                         'label': label})
+        flash(f'Mailbox {user} added', 'success')
+
+    _mc.save_accounts_to_file(accounts, since_days=since_days)
+    return redirect(url_for('web.settings'))
+
+
+@web.route('/settings/mail/<int:index>/delete', methods=['POST'])
+def delete_mail_account(index):
+    accounts = _mc.load_accounts_from_file()
+    if 0 <= index < len(accounts):
+        removed = accounts.pop(index)
+        _mc.save_accounts_to_file(accounts, since_days=_mc.configured_since_days())
+        flash(f'Mailbox {removed.get("user")} removed', 'success')
+    else:
+        flash('Mailbox not found', 'error')
+    return redirect(url_for('web.settings'))
+
+
+@web.route('/settings/mail/test', methods=['POST'])
+def test_mail_account():
+    """Try an IMAP login with the submitted (or stored) credentials, read-only."""
+    import imaplib
+    from datetime import datetime, timedelta, timezone
+
+    host = (request.form.get('host') or '').strip()
+    user = (request.form.get('user') or '').strip()
+    password = request.form.get('password') or ''
+    original = (request.form.get('original_user') or '').strip()
+    try:
+        port = int(request.form.get('port') or 993)
+        since_days = max(1, int(request.form.get('since_days') or 1))
+    except ValueError:
+        return jsonify({'ok': False, 'message': 'Port/days must be numbers'}), 400
+
+    if password == '' and original:
+        stored = next((a for a in _mc.load_accounts_from_file()
+                       if a.get('user') == original), None)
+        password = (stored or {}).get('password', '')
+
+    if not (host and user and password):
+        return jsonify({'ok': False, 'message': 'Host, address and password are required'}), 400
+
+    try:
+        conn = imaplib.IMAP4_SSL(host, port, timeout=30)
+        conn.login(user, password)
+    except Exception as exc:
+        return jsonify({'ok': False,
+                        'message': f'{type(exc).__name__}: {exc}'}), 200
+
+    try:
+        status, data = conn.select('INBOX')
+        total = int(data[0]) if data and data[0] else 0
+        since = (datetime.now(timezone.utc) - timedelta(days=since_days + 1)).strftime('%d-%b-%Y')
+        _, sdata = conn.uid('SEARCH', None, f'(SINCE {since})')
+        uids = sdata[0].split() if sdata and sdata[0] else []
+        conn.logout()
+        return jsonify({'ok': True,
+                        'message': f'Connected. INBOX has {total} messages; '
+                                   f'{len(uids)} arrived since {since}.',
+                        'total': total, 'candidates': len(uids)})
+    except Exception as exc:
+        try:
+            conn.logout()
+        except Exception:
+            pass
+        return jsonify({'ok': False, 'message': f'Login ok but SELECT failed: {exc}'}), 200

@@ -64,28 +64,42 @@ def create_app():
 def maybe_start_mail_collector(app):
     """Start the optional IMAP mail collector thread (mail_collector.py).
 
-    Only starts when MAIL_ACCOUNTS is set in the environment/.env. The thread
-    runs a collect cycle every MAIL_COLLECTOR_INTERVAL seconds (default 300)
-    and is a daemon, so it dies with the server. If you prefer cron instead,
-    leave MAIL_ACCOUNTS unset here and run
-    ``python mail_collector.py --once`` on a schedule.
+    Runs when a mailbox is configured either via MAIL_ACCOUNTS in the
+    environment or through the web Settings page (instance/mail_accounts.json).
+    The thread collects every MAIL_COLLECTOR_INTERVAL seconds (default 3600) and
+    is a daemon, so it dies with the server.
     """
-    if not (os.environ.get('MAIL_ACCOUNTS') or '').strip():
-        return
     try:
-        from mail_collector import run_collector_loop
-        interval = int(os.environ.get('MAIL_COLLECTOR_INTERVAL', '300'))
+        from mail_collector import (load_accounts, run_collector_loop,
+                                    configured_since_days)
     except Exception as exc:
         app.logger.error('Mail collector NOT started: %s', exc)
         return
+    try:
+        accounts = load_accounts()
+    except Exception as exc:
+        app.logger.error('Mail collector NOT started (bad config): %s', exc)
+        return
+    if not accounts:
+        return
+    try:
+        interval = int(os.environ.get('MAIL_COLLECTOR_INTERVAL', '3600'))
+    except ValueError:
+        interval = 3600
+    # IMPORTANT: pass since_days so the background run uses the same
+    # "last N days, all mail, never touch the \Seen flags" mode as the web
+    # button. Without it the collector falls back to UNSEEN mode, which marks
+    # the owner's mail as read — a side effect we must never cause.
+    since_days = configured_since_days()
     thread = threading.Thread(
         target=run_collector_loop,
-        kwargs={'interval': interval, 'logger': app.logger},
+        kwargs={'interval': interval, 'logger': app.logger, 'since_days': since_days},
         daemon=True,
         name='mail-collector',
     )
     thread.start()
-    app.logger.info('Mail collector thread started (interval=%ss)', interval)
+    app.logger.info('Mail collector thread started (%d account(s), every %ss, last %s day(s))',
+                    len(accounts), interval, since_days)
 
 def setup_logging(app):
     if not app.debug and not app.testing:

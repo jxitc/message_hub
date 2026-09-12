@@ -68,6 +68,8 @@ def make_request(endpoint, method='GET', data=None, params=None):
             response = requests.post(url, json=data, headers=headers, timeout=10)
         elif method == 'PUT':
             response = requests.put(url, json=data, headers=headers, timeout=10)
+        elif method == 'DELETE':
+            response = requests.delete(url, json=data, headers=headers, timeout=10)
         else:
             raise ValueError(f"Unsupported method: {method}")
         
@@ -114,6 +116,9 @@ def format_message(message, verbose=False):
     if verbose:
         click.echo(f"[{msg_id}] {msg_type}")
         click.echo(f"   From: {sender}")
+        recipients = (message.get('metadata') or {}).get('recipients')
+        if recipients:
+            click.echo(f"   To: {', '.join(recipients)}")
         click.echo(f"   Device: {device}")
         click.echo(f"   Time: {timestamp}")
         click.echo(f"   Content: {content}")
@@ -136,8 +141,11 @@ def cli(server, api_key):
 @click.option('--limit', '-l', default=10, help='Number of messages to show')
 @click.option('--type', '-t', help='Filter by message type (SMS, PUSH_NOTIFICATION, EMAIL, CALL_LOG)')
 @click.option('--device', '-d', help='Filter by source device')
+@click.option('--recipient', '-r', help='Filter email by recipient address (as delivered, e.g. jxitc@hotmail.com)')
+@click.option('--since', help='Only messages at/after this date (YYYY-MM-DD or ISO 8601)')
+@click.option('--until', help='Only messages at/before this date (YYYY-MM-DD = whole day)')
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed message information')
-def messages(limit, type, device, verbose):
+def messages(limit, type, device, recipient, since, until, verbose):
     """List messages from the hub"""
     
     # Build query parameters
@@ -146,6 +154,12 @@ def messages(limit, type, device, verbose):
         params['type'] = type
     if device:
         params['device'] = device
+    if recipient:
+        params['recipient'] = recipient
+    if since:
+        params['since'] = since
+    if until:
+        params['until'] = until
     
     response = make_request('/api/v1/messages', params=params)
     if not response:
@@ -184,6 +198,60 @@ def messages(limit, type, device, verbose):
     # Display messages
     for message in messages:
         format_message(message, verbose)
+
+
+@cli.command()
+@click.option('--id', 'ids', multiple=True, help='Delete this message id (repeatable)')
+@click.option('--type', '-t', help='Delete messages of this type')
+@click.option('--device', '-d', help='Delete messages from this device')
+@click.option('--recipient', '-r', help='Delete email delivered to this address')
+@click.option('--since', help='Delete messages at/after this date')
+@click.option('--until', help='Delete messages at/before this date')
+@click.option('--yes', is_flag=True, help='Actually delete; without it this is a dry run')
+def delete(ids, type, device, recipient, since, until, yes):
+    """Delete messages by id, or by filter (dry run unless --yes)
+
+    Deletion is permanent — there is no trash. Filter deletes always show the
+    count first; add --yes to carry them out.
+    """
+    if ids:
+        response = make_request('/api/v1/messages', method='DELETE', data={'ids': list(ids)})
+        if not response:
+            return
+        if response.status_code != 200:
+            click.echo(f"❌ Delete failed: {response.status_code} {response.text}", err=True)
+            return
+        result = response.json()
+        click.echo(f"🗑️  Deleted {result.get('deleted', 0)} of {result.get('requested', 0)} requested")
+        return
+
+    filters = {}
+    for key, value in (('type', type), ('device', device), ('recipient', recipient),
+                       ('since', since), ('until', until)):
+        if value:
+            filters[key] = value
+    if not filters:
+        click.echo("❌ Give either --id, or at least one filter (--type/--device/--recipient/--since/--until).", err=True)
+        click.echo("   Refusing to run unfiltered: that would delete every message.", err=True)
+        return
+
+    payload = dict(filters)
+    payload['dry_run'] = not yes
+    response = make_request('/api/v1/messages/delete', method='POST', data=payload)
+    if not response:
+        return
+    if response.status_code != 200:
+        click.echo(f"❌ Delete failed: {response.status_code} {response.text}", err=True)
+        return
+
+    result = response.json()
+    summary = result.get('filters', ', '.join(f'{k}={v}' for k, v in filters.items()))
+    if result.get('dry_run'):
+        click.echo(f"🔎 {result.get('would_delete', 0)} messages match [{summary}] — nothing deleted.")
+        click.echo("   Re-run with --yes to delete them.")
+    else:
+        click.echo(f"🗑️  Deleted {result.get('deleted', 0)} messages matching [{summary}]")
+
 
 @cli.command()
 @click.option('--verbose', '-v', is_flag=True, help='Show detailed error information')

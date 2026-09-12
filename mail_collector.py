@@ -82,10 +82,74 @@ def normalize_account(acc):
     return acc
 
 
+def config_file_path():
+    """Path of the web-managed account file (see the Settings page).
+
+    Kept outside git (instance/ is gitignored) and readable only by the service
+    user. The web UI writes it so the owner can add/change a mailbox without
+    SSHing in — and without the password ever passing through anyone else.
+    """
+    explicit = os.environ.get('MAIL_CONFIG_FILE')
+    if explicit:
+        return os.path.expanduser(explicit)
+    here = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(here, 'instance', 'mail_accounts.json')
+
+
+def load_accounts_from_file(path=None):
+    """Accounts from the JSON config file written by the web UI (may be empty)."""
+    path = path or config_file_path()
+    try:
+        with open(path, 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return []
+    raw = data.get('accounts') if isinstance(data, dict) else data
+    if not isinstance(raw, list):
+        return []
+    return [normalize_account(a) for a in raw if a]
+
+
+def save_accounts_to_file(accounts, since_days=None, path=None):
+    """Persist accounts (web UI). Writes 0600, atomically."""
+    path = path or config_file_path()
+    directory = os.path.dirname(path)
+    if directory:
+        os.makedirs(directory, exist_ok=True)
+    payload = {'accounts': list(accounts)}
+    if since_days is not None:
+        payload['since_days'] = int(since_days)
+    tmp = path + '.tmp'
+    with open(tmp, 'w', encoding='utf-8') as fh:
+        json.dump(payload, fh, ensure_ascii=False, indent=2)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+    return path
+
+
+def configured_since_days(default=1):
+    """Default look-back window, overridable from the config file."""
+    try:
+        with open(config_file_path(), 'r', encoding='utf-8') as fh:
+            data = json.load(fh)
+        return int(data.get('since_days', default))
+    except (OSError, ValueError, TypeError, AttributeError):
+        return default
+
+
 def load_accounts(env=None):
-    """Load mailbox configs from env: MAIL_ACCOUNTS (JSON array) or the
-    per-account MAIL_0_HOST / MAIL_0_USER / ... style."""
+    """Load mailbox configs.
+
+    Priority:
+      1. the JSON file written by the web Settings page (instance/mail_accounts.json)
+      2. env MAIL_ACCOUNTS (JSON array)
+      3. per-account MAIL_0_HOST / MAIL_0_USER / ... style
+    """
     env = env if env is not None else os.environ
+
+    from_file = load_accounts_from_file()
+    if from_file:
+        return from_file
 
     raw = (env.get('MAIL_ACCOUNTS') or '').strip()
     if raw:
@@ -196,6 +260,57 @@ def get_email_address(value):
     return (value or '').strip()
 
 
+def extract_addresses(value):
+    """All bare addresses inside a To/Cc-style header value.
+
+    Mail forwarded into a Gmail account keeps the *original* recipient in the
+    To header, which is how we tell which hosted mailbox (jiangxjx@… vs
+    jxitc@hotmail.com vs an alias) a message actually arrived at. Delivered-To
+    is useless here: Gmail rewrites it to the account itself.
+    """
+    if not value:
+        return []
+    decoded = decode_mime_header(value)
+    addresses = []
+    for _, addr in email.utils.getaddresses([decoded]):
+        addr = (addr or '').strip()
+        if addr and '@' in addr:
+            addresses.append(addr)
+    if not addresses:
+        bare = get_email_address(decoded)
+        if bare and '@' in bare:
+            addresses.append(bare)
+    return addresses
+
+
+def unique_lower(values):
+    """Case-insensitive dedupe that preserves the first spelling seen."""
+    seen, out = set(), []
+    for value in values:
+        key = (value or '').strip().lower()
+        if key and key not in seen:
+            seen.add(key)
+            out.append(value.strip())
+    return out
+
+
+def recipient_fields(msg):
+    """Recipient bookkeeping for one parsed message.
+
+    Shared by the live collector and the backfill script so a backfilled row
+    is indistinguishable from a freshly collected one.
+    """
+    return {
+        'to': decode_mime_header(msg.get('To', '')),
+        'cc': decode_mime_header(msg.get('Cc', '')),
+        'delivered_to': decode_mime_header(msg.get('Delivered-To', '')),
+        'original_to': decode_mime_header(
+            msg.get('X-Original-To', '') or msg.get('Envelope-To', '')),
+        'recipients': unique_lower(
+            extract_addresses(msg.get('To', '')) + extract_addresses(msg.get('Cc', ''))),
+    }
+
+
 def _decode_part(part):
     """Decode a message part's payload to str using its charset."""
     payload = part.get_payload(decode=True)
@@ -266,7 +381,7 @@ def parse_message(raw):
     date_raw = (msg.get('Date') or '').strip()
     dt = email.utils.parsedate_to_datetime(date_raw) if date_raw else None
 
-    return {
+    parsed = {
         'sender': sender[:255],
         'subject': subject,
         'date_raw': date_raw or '',
@@ -275,28 +390,38 @@ def parse_message(raw):
         'message_id': message_id,
         'body': extract_text_body(msg),
     }
+    parsed.update(recipient_fields(msg))
+    return parsed
 
 
 def build_payload(parsed, label):
     """Build the MH POST /api/v1/messages payload from a parsed mail."""
-    content = 'Subject: {subject}\nFrom: {sender}\nDate: {date}\n\n{body}'.format(
+    content = 'Subject: {subject}\nFrom: {sender}\nTo: {to}\nDate: {date}\n\n{body}'.format(
         subject=parsed['subject'] or '(no subject)',
         sender=parsed['sender'],
+        to=parsed.get('to') or '(unknown)',
         date=parsed['date_raw'] or parsed['date_iso'],
         body=parsed['body'],
     )
     device_id = 'mail-' + re.sub(r'[^A-Za-z0-9_-]', '-', label)
+    metadata = {
+        'mailbox': label,
+        'message_id': parsed['message_id'],
+        'subject': parsed['subject'],
+    }
+    # Recipient bookkeeping — empty values are omitted so the JSON stays small.
+    for key in ('to', 'cc', 'original_to', 'delivered_to'):
+        if parsed.get(key):
+            metadata[key] = parsed[key]
+    if parsed.get('recipients'):
+        metadata['recipients'] = parsed['recipients']
     return {
         'source_device_id': device_id,
         'type': 'EMAIL',
         'sender': parsed['sender'],
         'content': content,
         'timestamp': parsed['date_iso'],
-        'metadata': {
-            'mailbox': label,
-            'message_id': parsed['message_id'],
-            'subject': parsed['subject'],
-        },
+        'metadata': metadata,
     }
 
 

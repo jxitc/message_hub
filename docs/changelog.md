@@ -153,5 +153,59 @@ Time:...`），显示层又要剥一遍，冗余不正式。
 - **单元测试（2026-09-04）**：服务器 `tests/` pytest 套件（临时 SQLite + `MH_API_KEY`）——`test_auth`（无 key→401、对 key→200、错 key→401、`/health` 开放）、`test_messages`（POST 干净 content + 结构化 metadata → 201 + GET 回查），**7 passed**；安卓 JVM 单测——抽出纯函数 `MessageFormatter`/`MessageMapper` 并让 use case/ApiClient 复用，`MessageFormatterTest` 6 + `MessageMapperTest` 7，**14 例全过**；`requirements-dev.txt` 加 pytest。
 - **忽略/屏蔽 app 列表（2026-09-04）**：`AppPreferences.removeBlockedApp`；主页长按菜单按状态显示「禁止/取消屏蔽此 app 的通知」（toggle，`blockedApps` 状态驱动）；设置页新增「已忽略的通知 apps」列表 + 移除按钮。
 
+## 2026-09-12（邮件收件人识别 + 通用筛选与多选删除）
 
+### 1. 邮件收件人（To）：一封邮件到底寄给了哪个信箱
 
+- **问题**：托管了多个信箱（hotmail 等转发进 Gmail），只存 Subject/From/Date 就分不清
+  「这封信是寄给谁的」。
+- **实测结论**（Gmail IMAP 14 封转发邮件）：`Delivered-To` 恒为 Gmail 账号本身
+  （❌ 区分不出别名）；**`To` 保留原始收件地址**（✅ `jxitc@hotmail.com`）；
+  `Return-Path` 里的退信地址可交叉验证。
+- **改法**（`mail_collector.py`）：新增 `extract_addresses()` / `unique_lower()` /
+  `recipient_fields()`；`metadata` 增 `recipients`（To+Cc，小写去重）、`to`/`cc`/
+  `original_to`/`delivered_to`；`content` 头部加一行 `To:`（CLI 与下游不用解 metadata）。
+  空值不写入 metadata，保持 JSON 精简。
+- **回填**（`scripts/backfill-mail-recipients.py`，新增）：按 `Message-ID` 回邮箱取头，
+  `BODY.PEEK` **只读不标已读**，幂等。线上 4 封历史邮件实测：
+  **3 封寄给 `jxitc@hotmail.com`**、1 封 `jiangxjx@gmail.com` —— 正好印证了这个问题。
+
+### 2. 通用筛选 + 多选删除（用户纠正的模型）
+
+- **用户纠正**：「不是按邮箱清空，而是先很方便地筛选（设备/类型/时间）→ 显示结果 →
+  多选删除」。删除是作用在筛选结果上的动作，不是"清空某个邮箱"。
+- **新增 `message_filters.py`**：筛选逻辑**只有一份**，网页 / API / CLI / 删除路径全走它。
+  预览与删除若用两套筛选，迟早差一两行 → 用户丢掉没看过的数据。
+  - `apply_filters()` 给直观调用方；`apply_filter_dict()` 给持有 `normalize_filters()`
+    结果的调用方（键名是 `type`，`**filters` 会抛 TypeError，测试当场抓到）。
+  - `recipient` 用 **SQLite JSON1** 在 SQL 里匹配 `metadata.recipients`（Python 侧过滤
+    会让分页总数失真）；JSON1 缺失时 `list_recipients()` 返回空列表而不炸页面。
+  - 时间筛 `timestamp`（事发时间）而非 `received_at`（入库时间）——补录邮件两者差好几天。
+- **时区**：`<input type="date">` 无时区，若把 `2026-09-01` 当 UTC 日，UTC+8 下会错 8 小时。
+  网页提交时用浏览器时区换算成本地当天 00:00 / 23:59:59.999 的 UTC 瞬时串放进
+  `since_utc`/`until_utc`，服务端优先用 `*_utc`；CLI/API 给裸日期则按 UTC 日。
+  绑定 naive UTC datetime 比较（DB 里存的就是 naive UTC）。
+- **三个删除入口，都防误触**：
+  - 网页勾选删除（`POST /messages/delete`，表单 `ids` 可重复，上限 1000）；
+  - 网页「Delete all N matching」（`POST /messages/delete-filtered`，N 为服务端真实总数，
+    必须 `confirm=yes` 且**必须至少一个筛选条件**，否则拒绝——不然等于删库）；
+  - API `DELETE /api/v1/messages`（按 id）与 `POST /api/v1/messages/delete`
+    （按筛选，**`dry_run` 默认 true**，忘写只会拿到数量）；CLI `message-hub delete`
+    默认演练、`--yes` 才真删，无筛选直接拒绝。
+- **UI**：`/messages` 筛选区加「Received at (To)」下拉 + From/To 日期；每行复选框 +
+  表头全选（含 indeterminate 状态）+ 实时已选条数；消息卡片显示 `to xxx`；
+  筛选徽标与「filtered: …」摘要；翻页链接保留全部筛选参数。
+
+### 3. 验证
+
+- 本机功能测试（临时 SQLite，未碰真实数据）**全过**：筛选 6 例、API 5 例、
+  dry-run / 按 id / 按筛选删除 8 例、防误触 5 例、日期边界 5 例。
+- CLI 端到端（真起服务 + 真 CLI 子进程）**全过**：列筛选 4 例、拒绝无筛选 2 例、
+  演练 2 例、`--yes` 删除 2 例、按 id 1 例、按收件人 1 例。
+- 线上自查：收件人筛选 3 + 1 封符合预期；自建 `mh-selftest` 消息演练报 1 → 实删 1 →
+  回查 0（用完即删）。网页服务端渲染确认下拉、全选、`Delete all 3 matching`、
+  `to jxitc@hotmail.com` 均出现。
+- 新文档：`docs/message-filtering.md`（筛选/删除模型、时区处理、三入口、实现要点）。
+- `docs/mail-collector.md` 同步修正漂移：补 `To:` 与 recipients 元数据、新增
+  「收件人识别」与「增量模式 `--since-days`」小节（此前文档仍写着"UNSEEN 并把邮件标已读"，
+  且把 UID 增量列为"未实现"）、网页版配置来源优先级、回填脚本、路径修正 `jxitc` → `xiao`。
