@@ -135,6 +135,9 @@ class SettingsViewModel(
     private val _blockedApps = MutableStateFlow(preferences.blockedApps)
     val blockedApps: StateFlow<Set<String>> = _blockedApps.asStateFlow()
     
+    private val _apiKey = MutableStateFlow(preferences.apiKey)
+    val apiKey: StateFlow<String> = _apiKey.asStateFlow()
+
     private val _healthCheckResult = MutableStateFlow<String?>(null)
     val healthCheckResult: StateFlow<String?> = _healthCheckResult.asStateFlow()
     
@@ -144,6 +147,13 @@ class SettingsViewModel(
         clearHealthCheckResult()
     }
     
+    /** 保存 API Key（服务器 api/v1 接口鉴权用；留空则所有推送都会 401） */
+    fun updateApiKey(value: String) {
+        _apiKey.value = value
+        preferences.apiKey = value.trim()
+        clearHealthCheckResult()
+    }
+
     fun updateAutoSync(enabled: Boolean) {
         _autoSync.value = enabled
         preferences.autoSync = enabled
@@ -174,13 +184,31 @@ class SettingsViewModel(
             return
         }
         
+        // 两步都测：
+        // 1) /health —— 只验证"能否连上"（这个端点不需要 API Key）
+        // 2) 一个需要鉴权的接口 —— 验证 API Key 是否正确
+        //
+        // 只测第 1 步会给出**假阳性**：地址填错协议（http 而非 https）或没填 key 时，
+        // /health 依然返回 200，用户以为"连接正常"，实际消息全被 401/重定向吞掉。
         launchWithLoading(
             block = { apiClient.healthCheck() },
             onSuccess = { isHealthy ->
-                if (isHealthy) {
-                    _healthCheckResult.value = "✅ Server connection successful!"
-                } else {
+                if (!isHealthy) {
                     _healthCheckResult.value = "❌ Server responded but health check failed"
+                    setLoading(false)
+                    return@launchWithLoading
+                }
+                // 第 2 步：带 X-API-Key 拉 1 条，验证鉴权
+                viewModelScope.launch(exceptionHandler) {
+                    when (val auth = apiClient.getMemories(limit = 1)) {
+                        is ProcessingResult.Error ->
+                            _healthCheckResult.value =
+                                "⚠️ 服务器可达，但鉴权/接口失败：${auth.message}\n" +
+                                "（检查 API Key 是否已填写且正确）"
+                        else ->
+                            _healthCheckResult.value = "✅ 连接与鉴权均正常"
+                    }
+                    setLoading(false)
                 }
             },
             onError = { error ->

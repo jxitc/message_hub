@@ -38,6 +38,7 @@ fun SettingsScreen(
     val availableUpdate by viewModel.availableUpdate.collectAsStateWithLifecycle()
     val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
     val updateBusy by viewModel.updateBusy.collectAsStateWithLifecycle()
+    val apiKey by viewModel.apiKey.collectAsStateWithLifecycle()
     val deviceId by viewModel.deviceId.collectAsStateWithLifecycle()
     // 输入框直接预填当前生效的标识；deviceId 变化时同步刷新
     var deviceNameInput by remember(deviceId) { mutableStateOf(deviceId) }
@@ -107,6 +108,19 @@ fun SettingsScreen(
                         enabled = !isLoading,
                         supportingText = {
                             Text("MessageHub server address (include http://)")
+                        }
+                    )
+
+                    OutlinedTextField(
+                        value = apiKey,
+                        onValueChange = viewModel::updateApiKey,
+                        label = { Text("API Key") },
+                        placeholder = { Text("mhk_...") },
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = !isLoading,
+                        singleLine = true,
+                        supportingText = {
+                            Text("服务器 /api/v1/* 需要它。在网页 Settings 页生成（手机浏览器打开即可复制粘贴）")
                         }
                     )
                     
