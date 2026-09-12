@@ -234,4 +234,38 @@ Time:...`），显示层又要剥一遍，冗余不正式。
   这 4 个键（只动 `type='EMAIL'`，其他渠道的 `to` 等键不受影响）。随 deploy 自动执行。
 - **验证**：pytest 41 例全过（新增 `tests/test_migrate.py` 3 例：只删重复键且保留 `recipients`、
   幂等、不动其他渠道；`test_mail_recipients.py` 增断言 metadata 恰好只有 4 个键）。
+## 2026-09-12（追加：把"公共字段"约定写成契约 + 可检查）
+
+- **用户提问**："我们有没有最大公约数字段？把渠道专门字段塞 JSON 里，真要筛选也能搞，就是不优雅。"
+  答案：**有，但一直是隐式约定**——没人写下来、没人检查，于是每个渠道都重新漂移一次。
+- **术语更正**：我把它缩写成了 GCD，**已废弃**——GCD 在别处指最大公因数，在 Apple 平台上还是
+  Grand Central Dispatch。模块定名 `message_contract.py`，中文叫「公共字段」。
+- **契约三层**（`message_contract.py`）：
+  - 第一层公共列：`timestamp` / `type` / `sender` / `source_device_id` / `content` / `received_at`
+  - 第二层公共保留名（可选，放 JSON）：`recipients`；将来加"标题"统一叫 `title`，别再出现第 4 种叫法
+  - 第三层渠道私有键：`app_name` / `package_name` / `title` / `phone_number` / `mailbox` / `subject` …
+- **提升规则**（什么时候 JSON 键该升成列，三条）：① 是不是所有渠道都有 ② 筛选形态是单值还是数组
+  ③ 是不是已经存在于别处。**"看起来重要"不是理由**——`app_name` 覆盖 96% 消息、只有 22 个去重值，
+  但只有通知有，所以按契约它留在 JSON。
+- **JSON 筛选能力边界（实测，SQLite 3.37，已写进文档）**：
+  - 单值键等值：**能走索引**——`CREATE INDEX ... ON messages(json_extract(message_metadata,'$.app_name'))`
+    → 查询计划 `SEARCH m USING INDEX i_app`；所以"放 JSON + 需要时再筛"这条路对 `app_name`/`title` 完全成立；
+  - 数组键包含（`json_each`）：**不能走索引**——实测 `SCAN m` + `CORRELATED SCALAR SUBQUERY` +
+    `SCAN json_each VIRTUAL TABLE`，给 `json_extract(meta,'$.recipients')` 建了索引也用不上 → 线性扫。
+    这才是真正的天花板，也是将来必须升子表（`message_participants`）的唯一理由。
+  - 结论：日常主筛选路径 = 列 + **一个通用的 JSON 逃生舱**（`meta=key:value`），
+    而不是每来一个渠道加一个专门筛选维度。
+- **可检查性**：
+  - `scripts/audit-metadata.py`（新，只读）：按渠道列出实际写入的键 + 契约违规 + 值得做逃生舱的维度；
+  - `POST /api/v1/messages` 入库时跑 `lint_metadata()`，把"与列重复"的键打成 warning
+    （**只报告不拒绝**，否则老客户端会直接写不进来）。
+- **线上审计结果**（1,802 行）：3,457 次契约违规，全是"与列重复"，**没有未知键**——
+  `PUSH_NOTIFICATION.timestamp` 1735 / `.source` 1610；`SMS.timestamp` 63 / `.contact_name` 63 /
+  `.source` 49。其中 `metadata.timestamp` 实测与列是同一时刻（`21:54:47.821000` ↔ `1788472487821`）。
+- **已知缺口记录在案**：没有公共的"发给谁"列；`sender` 地址与显示名混用（63 条短信里 28 条
+  `sender` 存的是联系人名 `张丽捷`，地址在 JSON）；没有跨渠道"标题"。
+- **验证**：pytest **47 例全过**（新增 `tests/test_message_contract.py` 6 例，含"契约里声明的列必须
+  真实存在"以防文档与 schema 脱节）；线上端到端：POST 一条违规消息 → journald 出现 3 条契约告警 →
+  用 `DELETE /api/v1/messages` 清掉（`deleted:1`，回查 0 残留）。合规消息 0 告警。
+- 新文档：`docs/message-schema.md`（三层结构、提升规则、JSON 筛选能力矩阵、已知缺口）。
 

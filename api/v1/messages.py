@@ -5,6 +5,7 @@ from . import api_v1
 from models import db, Message
 from schemas.message_schema import MessageCreateSchema, MessageResponseSchema, MessageListSchema
 import message_filters as _mf
+import message_contract as _contract
 
 message_create_schema = MessageCreateSchema()
 message_response_schema = MessageResponseSchema()
@@ -75,6 +76,16 @@ def create_message():
             message_metadata=data.get('metadata', {}),
             received_at=datetime.now(timezone.utc)
         )
+        
+        # The field contract (see message_contract.py) says a fact that already
+        # lives in a column must not also be smuggled in through metadata.
+        # Report (never reject) so client drift shows up in logs instead of
+        # silently creating a second source of truth.
+        issues = _contract.lint_metadata(data['type'], message.message_metadata)
+        for issue in issues:
+            current_app.logger.warning(
+                'metadata contract: %s (device=%s, type=%s)',
+                issue, data['source_device_id'], data['type'])
         
         db.session.add(message)
         db.session.commit()
