@@ -61,6 +61,19 @@ NOTES="${MH_NOTES:-}"
 
 echo "==> version: $VERSION_NAME (code $VERSION_CODE), $(echo "scale=1; $SIZE_BYTES/1048576" | bc) MB"
 
+# ---- 2b) guard: the new versionCode must beat what is already published, -------
+# otherwise phones compare codes, see "no update", and silently ignore the release.
+REMOTE_CODE="$(curl -fsS --max-time 15 "https://mh.jxitc.com/api/v1/releases/latest-info" 2>/dev/null \
+  | python3 -c "import sys,json; print(json.load(sys.stdin).get('version_code', 0))" 2>/dev/null || echo "")"
+if [ -n "$REMOTE_CODE" ] && [ "$VERSION_CODE" -le "$REMOTE_CODE" ]; then
+  echo
+  echo "ERROR: versionCode $VERSION_CODE <= already published $REMOTE_CODE."
+  echo "       Phones would NOT see this as an update."
+  echo "       Bump versionCode (and usually versionName) in app/build.gradle.kts first."
+  echo "       Override with MH_FORCE=1 if you really mean to republish the same code."
+  [ "${MH_FORCE:-0}" = "1" ] || exit 1
+fi
+
 # ---- 3) upload ----------------------------------------------------------------
 echo "==> publishing to $SERVER:$REMOTE_DIR/instance/releases/"
 ssh -i "$SSH_KEY" -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile="$KNOWN_HOSTS" \

@@ -35,8 +35,9 @@ class SettingsViewModel(
     private var pendingApk: java.io.File? = null
 
     init {
-        val (name, code) = updateChecker.currentVersion()
-        _currentVersion.value = "$name ($code)"
+        // 只显示对用户有意义的 versionName；内部 versionCode 仅用于版本比较
+        val (name, _) = updateChecker.currentVersion()
+        _currentVersion.value = name
     }
 
     /** 拉 /api/v1/releases/latest-info 并比较版本号 */
