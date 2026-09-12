@@ -19,8 +19,11 @@ class NotificationProcessor(
      * 规则: 与**紧邻的上一条(任何 app)** 原始内容完全一致的通知只记第一条(严格相邻)。
      * 例: A A A → 1 条; A B A → 3 条 (B 打断后 A 重新开始, 不能被跨来源去重掉)。
      * 进程重启缓存清空 → 最多多记一条, 可接受。
+     *
+     * 注意: 去重的读-比-写必须是原子的（NotificationListener 对每个通知起协程并发调用），
+     * 这一职责由 [NotificationDeduplicator] 用 synchronized 保证。
      */
-    private var lastNotification: Triple<String, String, String>? = null
+    private val deduplicator = NotificationDeduplicator()
 
     suspend fun processNotification(sbn: StatusBarNotification) {
         try {
@@ -46,14 +49,12 @@ class NotificationProcessor(
                 return
             }
 
-            // 连续去重: 与全局"上一条"原始 title/content 完全一致 → 丢弃, 不更新缓存
+            // 连续去重: 与全局"上一条"原始 title/content 完全一致 → 丢弃(原子判断)
             // 用原始字段比较(不含格式化拼进去的 "Time:" 时间戳, 否则永远不相等, 去重失效)
-            val last = lastNotification
-            if (last != null && last.first == packageName && last.second == title && last.third == content) {
+            if (deduplicator.isDuplicate(packageName, title, content)) {
                 Logger.d("NotificationProcessor", "Duplicate consecutive notification from $packageName, skipping")
                 return
             }
-            lastNotification = Triple(packageName, title, content)
 
             // Process the notification using the use case
             val result = processNotificationUseCase.processNotification(
