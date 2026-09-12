@@ -173,15 +173,33 @@ curl -s -H "X-API-Key: $KEY" "https://mh.jxitc.com/api/v1/diagnostics/crashes/<i
 
 ### 6.2 编译并发布新版本（一条命令）
 
-```bash
-# 1) 先把 versionCode 加一（app 靠它判断有没有新版本）
-#    android_client/MessageHub/app/build.gradle.kts: versionCode / versionName
+**先按规则改版本号**（`android_client/MessageHub/app/build.gradle.kts`）：
 
-# 2) 编译 + 上传 + 写版本元数据 + 回读验证
+| | 用途 | 规则 |
+|---|---|---|
+| `versionCode` | 系统判断新旧、能否覆盖安装 | **整数，每次发布严格递增**（8、9、10…） |
+| `versionName` | 给人看 | **三段式 `MAJOR.MINOR.PATCH`**（如 `1.6.0`） |
+
+三种改动分别涨哪一位（**别把 MINOR 当计数器**，`1.1 → 1.2 → 1.3` 很快会顶到 2.0）：
+
+```
+MAJOR  不兼容的大改（数据格式变更等）   1.6.0 → 2.0.0   后两段归零
+MINOR  新增功能（向下兼容）             1.6.0 → 1.7.0   PATCH 归零
+PATCH  修 bug / 小改进                 1.6.0 → 1.6.1   只动最后一位
+```
+
+每段是独立整数而非小数，所以 `1.9.0 → 1.10.0 → 1.11.0` 都合法（读作 "one point ten"）；
+务必写全三段，免得 `1.10` 与 `1.1` 混淆。
+
+```bash
+# 编译 + 上传 + 写版本元数据 + 回读验证
 MH_NOTES="这次改了什么（会显示在手机上）" ./scripts/publish-apk.sh
 
 # 只上传已编译好的包：./scripts/publish-apk.sh --no-build
 ```
+
+脚本会拒绝发布 **versionCode 未递增**的包（那种情况下手机比对后认为"无更新"而静默忽略）；
+确有需要重发同一个 code 时用 `MH_FORCE=1`。
 
 脚本做四件事：`assembleDebug` → 用 aapt2 读出 versionName/versionCode →
 scp APK 与 `latest.json` 到 `instance/releases/`（该目录被 rsync 排除，`--delete` 不会清掉）→
