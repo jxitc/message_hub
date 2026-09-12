@@ -14,6 +14,15 @@
 ### 待办
 - [x] **API Key 鉴权**（重点：客户端手机端）——服务器 `/api/v1/*` 校验 `X-API-Key`（无 key→401、带 key→200、错 key→401、POST→201）；安卓端 `AppPreferences.apiKey` + OkHttp 拦截器自动带头；新 APK 已装手机并设 `server_url=https://mh.jxitc.com` + `api_key`；**E2E 通过**（simulate_sms → 远端 MH 库新增 `android-phone-1` SMS）
 - [x] 手机 `server_url` 切到 `https://mh.jxitc.com`，并 `ufw delete allow 5001/tcp` 收回公网 5001（只剩 22/80/443）
+- [x] **崩溃诊断与 APK 分发（2026-09-12）**：
+  - `POST/GET /api/v1/diagnostics/crashes` 接收/查询客户端崩溃（`crash_reports` 表，
+    `client_report_id` 作幂等键）；网页 `/crashes` 看列表与完整堆栈
+  - `GET /api/v1/releases`（列表，需 key）/ `GET /api/v1/releases/latest`（短链下载）/
+    `GET /api/v1/releases/latest-info`（版本元数据，供 app 内更新比较 versionCode）
+  - 下载路径刻意放在 `/api/*`（已豁免 Cloudflare Access 的路径），因为手机浏览器无法带
+    `X-API-Key` header；`/downloads/*` 会被 Access 302 到登录页
+  - 发布文件放 `instance/releases/`（rsync 排除目录，`--delete` 不会清掉）
+  - 详见 `docs/crash-reporting-and-ota.md`
 - [ ] **CLI 增强（给 Agent 用，2026-09-04）**：`message-hub` 目前**没 `post`**、且加了鉴权后已失效（`make_request` 不带 `X-API-Key`，`/api/v1/*` 全 401）。要做：
   - ① CLI 支持 API Key（`--api-key` / config / env `MH_CLI_API_KEY`），`make_request` 带 `X-API-Key` header
   - ② 加 `post`（发消息：`--content`/`--type`/`--sender`/`--device`/`--metadata`）

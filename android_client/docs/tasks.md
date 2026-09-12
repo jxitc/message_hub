@@ -145,6 +145,24 @@ This document breaks down the Android client development into concrete, independ
 
 **Note**: OPPO/Realme/OnePlus devices kill NotificationListenerService despite permission being granted due to ColorOS battery management. Auto-rebind often fails on these devices - user must manually toggle notification access OFF/ON to reconnect service. Current implementation detects this issue and guides users to the fix.
 
+### 3.6 Crash Reporting & In-App Update ✅ **COMPLETED (2026-09-12)**
+
+- [x] 3.6.1 **崩溃自动上报（无需 adb）**：`utils/CrashReporter.kt`
+  - Java 未捕获异常 → handler 写本地队列（崩溃瞬间落盘）；native 崩溃/ANR →
+    `ApplicationExitInfo.getHistoricalProcessExitReasons()` 取系统 tombstone
+  - 启动时批量上报到 `POST /api/v1/diagnostics/crashes`，成功即删、失败留待重试
+  - 已在真机验证（OPPO PHZ110 / Android 16）：`am crash` 触发的报告成功入库并带完整堆栈
+- [x] 3.6.2 **修掉"同一次崩溃上报两条"**：`REASON_CRASH` 在 exit-info 路径跳过（Java handler 已记录）
+- [x] 3.6.3 **日志安全阀**：`Logger` 按 **UTF-8 字节**截断到 3500（防 logd 单条 4068 上限触发 Android 16 ubsan abort）
+- [x] 3.6.4 **应用内自动更新（自建 OTA）**：`data/remote/UpdateChecker.kt`
+  - 拉 `/api/v1/releases/latest-info` → 比 `versionCode` → 下载到 `cacheDir/updates/`
+  - `FileProvider` + `ACTION_VIEW` 调起系统安装器；首次引导 `MANAGE_UNKNOWN_APP_SOURCES`
+  - Settings 页「App 更新」卡片：显示当前 versionName、检查更新、下载并安装
+  - 真机验证通过：1.1 → 1.2 应用内更新成功，数据保留
+- [x] 3.6.5 **APK 瘦身**：只打包 arm64-v8a → 53MB 降到 25MB（去掉模拟器/老机型架构）
+- [x] 3.6.6 **一键发布**：`scripts/publish-apk.sh`（编译 → 读版本 → 上传 + latest.json → 回读校验；
+  含"versionCode 必须大于线上"防呆）
+
 ## 4. Memory Processing Pipeline
 
 ### 4.1 Content Analysis
