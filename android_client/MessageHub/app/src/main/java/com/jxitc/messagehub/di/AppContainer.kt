@@ -13,6 +13,7 @@ import com.jxitc.messagehub.domain.service.SmsProcessor
 import com.jxitc.messagehub.domain.service.NotificationProcessor
 import com.jxitc.messagehub.data.local.AppPreferences
 import com.jxitc.messagehub.data.remote.MessageHubApiClient
+import com.jxitc.messagehub.data.remote.UpdateChecker
 import com.jxitc.messagehub.presentation.viewmodel.AddMemoryViewModel
 import com.jxitc.messagehub.presentation.viewmodel.MemoryListViewModel
 import com.jxitc.messagehub.presentation.viewmodel.SettingsViewModel
@@ -29,6 +30,11 @@ class AppContainer(private val context: Context) {
     
     val apiClient by lazy {
         MessageHubApiClient(appPreferences)
+    }
+
+    /** 应用内自动更新（检查版本 / 下载 APK / 拉起安装器） */
+    val updateChecker by lazy {
+        UpdateChecker(context.applicationContext, appPreferences)
     }
     
     val memoryRepository: MemoryRepository by lazy {
@@ -72,6 +78,6 @@ class AppContainer(private val context: Context) {
     }
     
     fun createSettingsViewModel(): SettingsViewModel {
-        return SettingsViewModel(appPreferences, apiClient)
+        return SettingsViewModel(appPreferences, apiClient, updateChecker)
     }
 }

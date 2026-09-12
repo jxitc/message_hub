@@ -59,3 +59,58 @@ def download_release_public(filename):
         abort(404)
     return send_from_directory(directory, filename, as_attachment=True,
                                mimetype='application/vnd.android.package-archive')
+
+
+@api_v1.route('/releases/latest', methods=['GET'])
+def download_latest():
+    """Redirect to the newest APK — a short URL to type on a phone."""
+    from flask import redirect
+    items = _list()
+    if not items:
+        abort(404)
+    return redirect('/api/v1/releases/' + items[0]['name'], code=302)
+
+
+# ---------------------------------------------------------------------------
+# Version metadata for the in-app updater.
+#
+# The upload script writes instance/releases/latest.json alongside the APK:
+#   {"version_name":"1.0","version_code":2,"filename":"messagehub-debug.apk",
+#    "size_bytes":..., "uploaded_at":"...","notes":"..."}
+# The app compares version_code with its own to decide whether to offer an update.
+# ---------------------------------------------------------------------------
+
+LATEST_META = 'latest.json'
+
+
+def _latest_meta():
+    path = os.path.join(_releases_dir(), LATEST_META)
+    if not os.path.isfile(path):
+        return None
+    try:
+        import json as _json
+        with open(path, 'r', encoding='utf-8') as fh:
+            meta = _json.load(fh)
+    except Exception:
+        return None
+
+    # fill in derived fields; the file supplies version_name/version_code/filename
+    name = meta.get('filename')
+    if name:
+        full = os.path.join(_releases_dir(), name)
+        if os.path.isfile(full):
+            st = os.stat(full)
+            meta.setdefault('size_bytes', st.st_size)
+            meta.setdefault('size_mb', round(st.st_size / 1048576, 1))
+            meta.setdefault('uploaded_at', st.st_mtime)
+            meta['download_url'] = '/api/v1/releases/' + name
+    return meta
+
+
+@api_v1.route('/releases/latest-info', methods=['GET'])
+def latest_info():
+    """Version metadata for the in-app updater (JSON, no redirect)."""
+    meta = _latest_meta()
+    if meta is None:
+        return jsonify({'error': 'No release metadata published yet'}), 404
+    return jsonify(meta)

@@ -34,6 +34,10 @@ fun SettingsScreen(
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
     val healthCheckResult by viewModel.healthCheckResult.collectAsStateWithLifecycle()
+    val currentVersion by viewModel.currentVersion.collectAsStateWithLifecycle()
+    val availableUpdate by viewModel.availableUpdate.collectAsStateWithLifecycle()
+    val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
+    val updateBusy by viewModel.updateBusy.collectAsStateWithLifecycle()
     
     val context = LocalContext.current
 
@@ -530,6 +534,71 @@ fun SettingsScreen(
                 }
             }
             
+            // App update (built-in OTA: checks /api/v1/releases/latest-info)
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        text = "App 更新",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Text(
+                        text = "当前版本：$currentVersion",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    availableUpdate?.let { info ->
+                        Text(
+                            text = "新版本 ${info.versionName}（${info.sizeMb} MB）可用",
+                            style = MaterialTheme.typography.bodyMedium,
+                            fontWeight = FontWeight.Medium
+                        )
+                        if (info.notes.isNotBlank()) {
+                            Text(
+                                text = info.notes,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    updateStatus?.let { status ->
+                        Text(
+                            text = status,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedButton(
+                            onClick = { viewModel.checkForUpdate() },
+                            enabled = !updateBusy
+                        ) {
+                            Text(if (updateBusy) "处理中…" else "检查更新")
+                        }
+                        if (availableUpdate != null) {
+                            Button(
+                                onClick = { viewModel.downloadAndInstallUpdate() },
+                                enabled = !updateBusy
+                            ) {
+                                Text("下载并安装")
+                            }
+                        }
+                    }
+
+                    Text(
+                        text = "注：下载后系统会弹出安装确认（Android 不允许应用静默自升级），点\"安装\"即可覆盖，数据保留。",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
             // Info Section
             Card {
                 Column(

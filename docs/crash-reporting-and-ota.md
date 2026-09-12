@@ -49,12 +49,20 @@
                   └─────────────────┘
 ```
 
-修复后如何送回去（OTA）：
+修复后如何送回去（OTA）——两条路径，手机上的应用内更新是主线：
 
 ```
-本机编译 APK ──scp──▶ 服务器 instance/releases/ ──▶ 网页 /settings 给下载链接
-                                                      │
-                                            手机浏览器点链接下载 → 点安装 → 覆盖
+本机: ./scripts/publish-apk.sh
+        │ 编译 + 读版本号 + 写 latest.json
+        ▼
+服务器 instance/releases/{messagehub-debug.apk, latest.json}
+        │
+        ├──▶ GET /api/v1/releases/latest-info   ← 手机 app 拉元数据比版本
+        │         │
+        │         ▼
+        │    Settings → App 更新 → 检查更新 → 下载并安装 → 系统安装器（点一下）
+        │
+        └──▶ GET /api/v1/releases/latest        ← 浏览器短链接（备用/首次安装）
 ```
 
 ---
@@ -112,6 +120,26 @@
 
 ---
 
+## 4.5 应用内自动更新（自建 OTA）
+
+实现在 `data/remote/UpdateChecker.kt` + Settings 页的「App 更新」卡片：
+
+1. `GET /api/v1/releases/latest-info`（带 `X-API-Key`）拿服务器上的
+   `{version_name, version_code, size_mb, download_url, notes}`
+2. 与自己 `versionCode` 比较：`remote <= local` → "已是最新"
+3. 有新版：显示版本号/体积/notes → 点「下载并安装」
+   - 下载到 `cacheDir/updates/`，带百分比进度
+   - 用 `FileProvider` 把文件以 `content://` 交给系统安装器（`ACTION_VIEW` +
+     `application/vnd.android.package-archive`）
+4. 系统弹安装确认 → 用户点"安装" → 覆盖安装（签名一致时**数据保留**）
+
+需要的声明：`REQUEST_INSTALL_PACKAGES` 权限 + `FileProvider`
+（`${applicationId}.fileprovider` → `res/xml/file_paths.xml` 暴露 `cache-path updates/`）。
+首次安装未知来源应用时，用 `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES` 引导授权。
+
+**为什么最后一步不能自动化**：Android 不允许普通应用静默自升级（除非设备所有者 / MDM /
+系统签名）。能做的是把"找地址 → 下载 → 点开"这前三步省掉，只剩一次系统确认。
+
 ## 5. 已知限制（诚实记录）
 
 | 限制 | 说明 | 缓解 |
@@ -143,19 +171,24 @@ curl -s -H "X-API-Key: $KEY" "https://mh.jxitc.com/api/v1/diagnostics/crashes/<i
 > ⚠️ 本机 DNS 可能缓存了旧 IP；走 Cloudflare 时加 `--resolve mh.jxitc.com:443:<CF_IP>`，
 > 或直接 SSH 到服务器用 `127.0.0.1:5001`。
 
-### 6.2 编译并推送新版本
+### 6.2 编译并发布新版本（一条命令）
 
 ```bash
-# 编译（工具链装在本机 ~/mypro/toolchain，无需 Android Studio）
-bash /tmp/mh-android/build.sh assembleDebug
+# 1) 先把 versionCode 加一（app 靠它判断有没有新版本）
+#    android_client/MessageHub/app/build.gradle.kts: versionCode / versionName
 
-# 上传到服务器（放在 instance/releases/ —— 该目录被 rsync 排除，不会被 --delete 清掉）
-scp -i ~/mypro/.mh_deploy/id_ed25519 \
-  android_client/MessageHub/app/build/outputs/apk/debug/app-debug.apk \
-  root@188.166.172.192:/opt/message_hub/instance/releases/messagehub-debug.apk
+# 2) 编译 + 上传 + 写版本元数据 + 回读验证
+MH_NOTES="这次改了什么（会显示在手机上）" ./scripts/publish-apk.sh
+
+# 只上传已编译好的包：./scripts/publish-apk.sh --no-build
 ```
 
-然后手机上打开 `https://mh.jxitc.com/settings` → Mobile App (APK) → Download → 安装。
+脚本做四件事：`assembleDebug` → 用 aapt2 读出 versionName/versionCode →
+scp APK 与 `latest.json` 到 `instance/releases/`（该目录被 rsync 排除，`--delete` 不会清掉）→
+curl 回读 `latest-info` 确认发布成功。
+
+发布后手机上：**Settings → App 更新 → 检查更新 → 下载并安装**。
+首次会在系统里要求"允许安装未知应用"（每个来源应用单独授权一次）。
 
 ### 6.3 本机 adb（装机/救砖时用）
 
@@ -199,4 +232,6 @@ adb shell run-as com.jxitc.messagehub cp /data/local/tmp/messagehub_database dat
 | APK 下载端点 | `web/views.py` (`/downloads/<filename>`, `_list_releases`) |
 | 客户端采集 | `android_client/.../utils/CrashReporter.kt` |
 | 客户端接入点 | `android_client/.../MessageHubApplication.kt` |
+| 应用内更新逻辑 | `android_client/.../data/remote/UpdateChecker.kt` |
+| 发布脚本 | `scripts/publish-apk.sh` |
 | 日志安全阀（防超长日志杀进程） | `android_client/.../utils/Logger.kt` |
