@@ -23,44 +23,36 @@ class AppPreferences(private val context: Context) {
         set(value) = prefs.edit().putString(KEY_API_KEY, value).apply()
 
     /**
-     * 用户自定义的设备名（可空）。在 App 的 Settings 里填，用于让多台设备在服务器上一眼可分。
-     * 填了就直接当 deviceId 用（业界主流：像 Apple 的 "John's iPhone"、Home Assistant 的实体名）。
-     */
-    var customDeviceName: String
-        get() = prefs.getString(KEY_CUSTOM_DEVICE_NAME, "") ?: ""
-        set(value) {
-            prefs.edit().putString(KEY_CUSTOM_DEVICE_NAME, value.trim()).apply()
-            prefs.edit().remove(KEY_DEVICE_ID).apply()   // 让 deviceId 重新计算
-            Logger.i("Custom device name set: '${value.trim()}'")
-        }
-
-    /**
-     * 本机唯一设备 ID（消息与崩溃上报都用它标 source_device_id）。
+     * 本机设备标识（消息与崩溃上报的 source_device_id）。
      *
-     * 三层取名，总是人类可读（业界通行做法）：
-     *   1. 用户在 App 里填的自定义名            → `oppo-main`、`s8`
-     *   2. 否则用系统设备名(Settings.Global.DEVICE_NAME，用户在系统设置里起的)
-     *      + 短码                              → `Alice-S8-a1b2c3`
-     *   3. 否则用机型 + 短码                    → `PHZ110-3f2a1c`
-     *
-     * 短码取 ANDROID_ID 尾 6 位，只为解决"两台同型号/同名"的冲突；
-     * ANDROID_ID 在 Android 8+ 按 (应用签名, 用户, 设备) 派生，**卸载重装不变**。
+     * 首次运行自动生成一个可读值（系统设备名/机型 + 短码，如 `Alice-S8-a1b2c3`），
+     * 之后**以存储值为准**——用户在 Settings 里看到的就是这个值，直接改它即可。
+     * 不再有"自定义名/留空=自动"两层概念：写入的就是生效的。
      *
      * 历史教训：这个值曾在 MessageHubApiClient 里硬编码为 "android-phone-1"，
      * 只有一台设备时看不出来，第二台设备一接入就全混到同一个名字下，无法区分来源。
      */
     val deviceId: String
-        get() = prefs.getString(KEY_DEVICE_ID, null) ?: generateDeviceId()
+        get() = prefs.getString(KEY_DEVICE_ID, null) ?: generateAndStoreDeviceId()
 
-    private fun generateDeviceId(): String {
-        val custom = customDeviceName.trim()
-        val id = if (custom.isNotEmpty()) {
-            custom.replace(Regex("[^A-Za-z0-9_.-]"), "-")
-        } else {
-            val base = systemDeviceName() ?: (Build.MODEL ?: "device")
-            val safe = base.replace(Regex("[^A-Za-z0-9_-]"), "-")
-            "$safe-${shortSuffix()}"
-        }
+    /** 直接设置设备标识（清理非法字符）。空值忽略，避免把标识清成空。 */
+    fun setDeviceId(value: String) {
+        val clean = value.trim().replace(Regex("[^A-Za-z0-9_.-]"), "-")
+        if (clean.isEmpty()) return
+        prefs.edit().putString(KEY_DEVICE_ID, clean).apply()
+        Logger.i("Device ID set to: $clean")
+    }
+
+    /** 恢复为自动生成的标识（系统设备名/机型 + 短码）。 */
+    fun resetDeviceId(): String {
+        prefs.edit().remove(KEY_DEVICE_ID).apply()
+        return deviceId
+    }
+
+    private fun generateAndStoreDeviceId(): String {
+        val base = systemDeviceName() ?: (Build.MODEL ?: "device")
+        val safe = base.replace(Regex("[^A-Za-z0-9_-]"), "-")
+        val id = "$safe-${shortSuffix()}"
         prefs.edit().putString(KEY_DEVICE_ID, id).apply()
         Logger.i("Device ID assigned: $id")
         return id
@@ -138,7 +130,6 @@ class AppPreferences(private val context: Context) {
         private const val KEY_SYNC_WIFI_ONLY = "sync_wifi_only"
         private const val KEY_BLOCKED_APPS = "blocked_apps"
         private const val KEY_DEVICE_ID = "device_id"
-        private const val KEY_CUSTOM_DEVICE_NAME = "custom_device_name"
         
         // Default values
         const val DEFAULT_SERVER_URL = "http://10.0.2.2:8000" // Android emulator localhost

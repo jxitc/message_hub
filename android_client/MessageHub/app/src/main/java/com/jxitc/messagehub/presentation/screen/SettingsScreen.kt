@@ -39,8 +39,8 @@ fun SettingsScreen(
     val updateStatus by viewModel.updateStatus.collectAsStateWithLifecycle()
     val updateBusy by viewModel.updateBusy.collectAsStateWithLifecycle()
     val deviceId by viewModel.deviceId.collectAsStateWithLifecycle()
-    val customDeviceName by viewModel.customDeviceName.collectAsStateWithLifecycle()
-    var deviceNameInput by remember { mutableStateOf(customDeviceName) }
+    // 输入框直接预填当前生效的标识；deviceId 变化时同步刷新
+    var deviceNameInput by remember(deviceId) { mutableStateOf(deviceId) }
     
     val context = LocalContext.current
 
@@ -549,30 +549,27 @@ fun SettingsScreen(
                         fontWeight = FontWeight.Medium
                     )
                     Text(
-                        text = "服务器上的设备标识：$deviceId",
-                        style = MaterialTheme.typography.bodyMedium
-                    )
-                    Text(
-                        text = "多台手机同时上报时靠它区分来源。默认取自系统设备名/机型，也可以自己起个好认的名字。",
+                        text = "多台手机同时上报时，服务器靠这个标识区分来源（就是消息的 source_device_id）。",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
                         value = deviceNameInput,
                         onValueChange = { deviceNameInput = it },
-                        label = { Text("设备名（留空 = 自动）") },
+                        label = { Text("设备标识") },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.updateDeviceName(deviceNameInput) }) {
-                            Text("保存设备名")
+                        Button(
+                            onClick = { viewModel.setDeviceId(deviceNameInput) },
+                            enabled = deviceNameInput.trim().isNotEmpty() &&
+                                      deviceNameInput.trim() != deviceId
+                        ) {
+                            Text("保存")
                         }
-                        OutlinedButton(onClick = {
-                            deviceNameInput = ""
-                            viewModel.updateDeviceName("")
-                        }) {
-                            Text("恢复自动")
+                        OutlinedButton(onClick = { viewModel.resetDeviceId() }) {
+                            Text("恢复默认")
                         }
                     }
                 }

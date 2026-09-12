@@ -35,22 +35,19 @@ class SettingsViewModel(
     private var pendingApk: java.io.File? = null
 
     // ---- 本机设备标识（多设备时用于区分来源）----
-    /** 当前生效的设备标识，即消息上报的 source_device_id */
+    /** 当前生效的设备标识 = 消息上报的 source_device_id（Settings 里显示并可改的就是它） */
     private val _deviceId = MutableStateFlow(preferences.deviceId)
     val deviceId: StateFlow<String> = _deviceId.asStateFlow()
 
-    /** 用户自定义的设备名（空 = 用系统设备名/机型自动生成） */
-    private val _customDeviceName = MutableStateFlow(preferences.customDeviceName)
-    val customDeviceName: StateFlow<String> = _customDeviceName.asStateFlow()
-
-    /**
-     * 保存自定义设备名。留空则回退到"系统设备名/机型 + 短码"的自动值。
-     * 只影响之后上报的消息，历史消息的 source_device_id 不变。
-     */
-    fun updateDeviceName(name: String) {
-        preferences.customDeviceName = name
-        _customDeviceName.value = preferences.customDeviceName
+    /** 直接保存设备标识（写入即生效）。只影响之后上报的消息，历史消息不变。 */
+    fun setDeviceId(name: String) {
+        preferences.setDeviceId(name)
         _deviceId.value = preferences.deviceId
+    }
+
+    /** 恢复为自动生成的标识（系统设备名/机型 + 短码） */
+    fun resetDeviceId() {
+        _deviceId.value = preferences.resetDeviceId()
     }
 
     init {
