@@ -40,6 +40,10 @@ class MessageHubApiClient(
     }
     
     private val okHttpClient = OkHttpClient.Builder()
+        // 不跟随重定向：服务器若回 301/302（例如误填 http:// 被强制跳 https），
+        // OkHttp 默认会把 POST 降级成 GET —— 消息提交会静默变成"查列表"，
+        // 表面上还不报错。这里直接让 3xx 成为失败，并在下面给出可读的错误。
+        .followRedirects(false)
         .addInterceptor(loggingInterceptor)
         // Attach the shared API key to every request to MH /api/v1/* (header).
         .addInterceptor { chain ->
@@ -57,7 +61,7 @@ class MessageHubApiClient(
     
     private fun createApiService(): MessageHubApiService {
         val retrofit = Retrofit.Builder()
-            .baseUrl(preferences.serverUrl.ensureTrailingSlash())
+            .baseUrl(preferences.effectiveServerUrl.ensureTrailingSlash())
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create())
             .build()
@@ -93,7 +97,7 @@ class MessageHubApiClient(
                         )
                     )
                 } else {
-                    val errorMsg = "HTTP ${response.code()}: ${response.message()}"
+                    val errorMsg = describeHttpError(response.code(), response.message())
                     Logger.e("MH API error: $errorMsg")
                     ProcessingResult.Error("Network error: $errorMsg")
                 }
@@ -125,7 +129,7 @@ class MessageHubApiClient(
                         ProcessingResult.Error("MH server returned empty body")
                     }
                 } else {
-                    val errorMsg = "HTTP ${response.code()}: ${response.message()}"
+                    val errorMsg = describeHttpError(response.code(), response.message())
                     Logger.e("MH API error: $errorMsg")
                     ProcessingResult.Error("Network error: $errorMsg")
                 }
@@ -149,7 +153,7 @@ class MessageHubApiClient(
                     Logger.i("Server health check passed")
                     ProcessingResult.Success(true)
                 } else {
-                    val errorMsg = "HTTP ${response.code()}: ${response.message()}"
+                    val errorMsg = describeHttpError(response.code(), response.message())
                     Logger.e("Health check failed: $errorMsg")
                     ProcessingResult.Error("Health check failed: $errorMsg")
                 }
@@ -185,6 +189,18 @@ class MessageHubApiClient(
         val instant = if (epochMillis != null) Instant.ofEpochMilli(epochMillis) else Instant.now()
         return instant.toString() // e.g. 2026-08-31T07:00:00Z
     }
+
+    /**
+     * 把 HTTP 状态码解释成人能读懂的话。
+     * 3xx 需要特别说明：那通常意味着 Server URL 漏了 https，而重定向会把 POST 变成 GET。
+     */
+    private fun describeHttpError(code: Int, message: String?): String =
+        if (code in 300..399) {
+            "HTTP $code: 服务器要求跳转（通常是 Server URL 少了 https://）——" +
+                "重定向会把 POST 降级成 GET，消息会静默丢失"
+        } else {
+            "HTTP $code: $message"
+        }
 
     private fun String.ensureTrailingSlash(): String {
         return if (this.endsWith("/")) this else "$this/"

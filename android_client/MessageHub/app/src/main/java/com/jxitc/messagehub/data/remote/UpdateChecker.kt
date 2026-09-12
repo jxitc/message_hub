@@ -44,6 +44,7 @@ class UpdateChecker(
 
     private val http by lazy {
         OkHttpClient.Builder()
+            .followRedirects(false)   // 同上：301 当作错误，不要静默降级成 GET
             .connectTimeout(20, TimeUnit.SECONDS)
             .readTimeout(60, TimeUnit.SECONDS)   // APK 可能几十 MB
             .build()
@@ -69,7 +70,7 @@ class UpdateChecker(
      */
     suspend fun checkForUpdate(): ProcessingResult<ReleaseInfo?> = withContext(Dispatchers.IO) {
         try {
-            val base = preferences.serverUrl.trimEnd('/')
+            val base = preferences.effectiveServerUrl.trimEnd('/')
             if (base.isBlank()) return@withContext ProcessingResult.Error("Server URL not configured")
 
             val request = Request.Builder()
@@ -121,7 +122,7 @@ class UpdateChecker(
         onProgress: (Int) -> Unit = {},
     ): ProcessingResult<File> = withContext(Dispatchers.IO) {
         try {
-            val base = preferences.serverUrl.trimEnd('/')
+            val base = preferences.effectiveServerUrl.trimEnd('/')
             val url = if (info.downloadUrl.startsWith("http")) info.downloadUrl else "$base${info.downloadUrl}"
 
             val dir = File(context.cacheDir, "updates").apply { mkdirs() }

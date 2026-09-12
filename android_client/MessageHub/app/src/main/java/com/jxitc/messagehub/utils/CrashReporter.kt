@@ -47,6 +47,7 @@ object CrashReporter {
 
     private val http by lazy {
         OkHttpClient.Builder()
+            .followRedirects(false)   // 同上：301 当作错误
             .connectTimeout(15, TimeUnit.SECONDS)
             .readTimeout(20, TimeUnit.SECONDS)
             .writeTimeout(20, TimeUnit.SECONDS)
@@ -162,7 +163,7 @@ object CrashReporter {
             val files = dir.listFiles { f -> f.isFile && f.name.endsWith(".json") } ?: return
             if (files.isEmpty()) return
 
-            val serverUrl = prefs.serverUrl.trimEnd('/')
+            val serverUrl = prefs.effectiveServerUrl.trimEnd('/')
             val apiKey = prefs.apiKey
             if (serverUrl.isBlank()) return
 

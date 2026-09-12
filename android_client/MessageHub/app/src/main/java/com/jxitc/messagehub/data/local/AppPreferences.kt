@@ -17,6 +17,18 @@ class AppPreferences(private val context: Context) {
         get() = prefs.getString(KEY_SERVER_URL, DEFAULT_SERVER_URL) ?: DEFAULT_SERVER_URL
         set(value) = prefs.edit().putString(KEY_SERVER_URL, value).apply()
 
+    /**
+     * 实际用于请求的地址。
+     *
+     * 把**公网**的 `http://` 自动升级成 `https://`：服务器（nginx）对 http 请求回 301 到 https，
+     * 而 OkHttp 按 HTTP 标准会把 301 后的 POST **降级成 GET** —— 消息提交因此变成"查列表"，
+     * 静默失败，表面上"测试连接"还是通的（/health 是 GET，重定向后照样 200）。
+     *
+     * 本地/私有地址保持 http 不动，方便连开发机（10.0.2.2 模拟器、192.168.x 局域网）。
+     */
+    val effectiveServerUrl: String
+        get() = normalizeServerUrl(serverUrl)
+
     /** Shared API key sent as the X-API-Key header for Message Hub requests. */
     var apiKey: String
         get() = prefs.getString(KEY_API_KEY, "") ?: ""
@@ -120,6 +132,18 @@ class AppPreferences(private val context: Context) {
         Logger.i("App preferences reset to defaults")
     }
     
+    /** 本地/私有网段（这些保持 http，其余公网地址自动升级 https） */
+    private val PRIVATE_HOST = Regex(
+        "^(localhost|127\\.0\\.0\\.1|10\\..*|192\\.168\\..*|172\\.(1[6-9]|2[0-9]|3[01])\\..*)$"
+    )
+
+    private fun normalizeServerUrl(raw: String): String {
+        val url = raw.trim()
+        if (!url.startsWith("http://", ignoreCase = true)) return url
+        val host = url.substring("http://".length).substringBefore('/').substringBefore(':')
+        return if (PRIVATE_HOST.matches(host)) url else "https://" + url.substring("http://".length)
+    }
+
     companion object {
         private const val PREFS_NAME = "messagehub_prefs"
         
