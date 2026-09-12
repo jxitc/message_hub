@@ -13,8 +13,16 @@ android {
         applicationId = "com.jxitc.messagehub"
         minSdk = 24
         targetSdk = 36
-        versionCode = 4
-        versionName = "1.3"
+        versionCode = 5
+        versionName = "1.4"
+
+        // 只打包真机需要的 ABI。debug 包默认把 4 种架构的 native 库全塞进来
+        // （x86/x86_64 是模拟器用的，armeabi-v7a 是老 32 位机），实测某含 ML Kit
+        // 的应用因此多出约 29MB。PHZ110 等现代手机都是 arm64-v8a。
+        // 需要在 x86_64 模拟器上跑时，把下面这行注释掉即可。
+        ndk {
+            abiFilters += "arm64-v8a"
+        }
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
