@@ -25,12 +25,18 @@ class MessageHubApiClient(
     private val preferences: AppPreferences
 ) {
 
-    // HTTP logging: Enabled for debugging (set to NONE for production builds)
-    // TODO: Change to Level.NONE before releasing to production
+    // HTTP logging: BASIC only (method/URL/status/timing).
+    //
+    // Level.BODY prints the whole request/response payload as ONE log line. A
+    // body larger than logd's single-entry limit (~4068 bytes) makes Android's
+    // logd chunking path run, and on Android 16 that path aborts the process
+    // through an ubsan sub-overflow check (SIGABRT with no Java stack trace —
+    // it looks like a silent crash on launch). A single long message (e.g. a
+    // full article body) is enough to trigger it. Keep BASIC or NONE.
     private val loggingInterceptor = HttpLoggingInterceptor { message ->
         Logger.d(message, "API")
     }.apply {
-        level = HttpLoggingInterceptor.Level.BODY  // Change to NONE for production
+        level = HttpLoggingInterceptor.Level.BASIC
     }
     
     private val okHttpClient = OkHttpClient.Builder()
