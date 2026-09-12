@@ -268,4 +268,24 @@ Time:...`），显示层又要剥一遍，冗余不正式。
   真实存在"以防文档与 schema 脱节）；线上端到端：POST 一条违规消息 → journald 出现 3 条契约告警 →
   用 `DELETE /api/v1/messages` 清掉（`deleted:1`，回查 0 残留）。合规消息 0 告警。
 - 新文档：`docs/message-schema.md`（三层结构、提升规则、JSON 筛选能力矩阵、已知缺口）。
+## 2026-09-12（更正：就叫 metadata JSON，不确定的先塞进去）
+
+- **用户定调**："就叫 metadata json 吧，不确定的先往里面塞。"
+  我上一轮造的"公共字段契约 / 三层结构"那套概念名收掉——**默认落点就是 `message_metadata`
+  （JSON）**，不当临时方案看待：渠道会一直变，等想清楚了再决定要不要升列，比现在猜 schema 划算。
+- **改名**（上一轮的命名整体作废）：`message_contract.py` → `metadata_policy.py`，
+  `docs/message-schema.md` → `docs/metadata-json.md`，`COMMON_FIELDS`→`CORE_COLUMNS`、
+  `RESERVED_JSON_NAMES`→`SHARED_JSON_KEYS`、`KNOWN_CHANNEL_KEYS`→`OBSERVED_CHANNEL_KEYS`、
+  `describe_contract()`→`describe_policy()`、审计脚本 `--contract`→`--policy`。
+  三层结构压成两句大白话：**列只留决定结构的 6 个；其余不确定的先塞 JSON**。
+- **只保留一条纪律**：别把已经存在于列里的事实再抄一份进 JSON（否则两个真相来源迟早漂移）。
+  这条不删的理由是有实测代价：线上 1,802 行里 3,457 次违规**全是这一类**，
+  而且**是客户端在写的、服务端删不掉，只能等改客户端**——所以必须守在入库前（`lint_metadata()`
+  打 warning，只报告不拒绝）。
+- **保留的实测结论**（支撑"塞进去之后还能筛"）：单值键建表达式索引后走 `SEARCH ... USING INDEX`；
+  数组键只能 `SCAN m` + `json_each` 相关子查询。所以日常筛选路径 = 列 + 一个通用 JSON 逃生舱，
+  数组才需要考虑升子表。
+- **顺手修**：`scripts/audit-metadata.py` 在空库上不再抛 SQLAlchemy 栈，改为明确提示
+  （本地开发库此前被测试误删过表，已重新建表恢复）。
+- 验证：pytest 47 例全过；线上 `--policy` 输出与审计报表均正常（3,457 次重复键明细可复现）。
 

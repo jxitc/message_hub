@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Audit how well the stored metadata matches the field contract.
+"""Audit how well the stored metadata matches the field policy.
 
 Answers three questions from real data instead of opinion:
 
@@ -11,7 +11,7 @@ Answers three questions from real data instead of opinion:
 Read-only. Run on the server from /opt/message_hub:
 
     ./venv/bin/python scripts/audit-metadata.py
-    ./venv/bin/python scripts/audit-metadata.py --contract   # print the contract too
+    ./venv/bin/python scripts/audit-metadata.py --policy   # print the policy too
 """
 
 import argparse
@@ -22,7 +22,9 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import message_contract as contract  # noqa: E402
+import metadata_policy as policy  # noqa: E402
+from sqlalchemy.exc import OperationalError  # noqa: E402
+
 from app import create_app  # noqa: E402
 from models import db, Message  # noqa: E402
 
@@ -68,11 +70,11 @@ def report(per_channel):
         for key, count in bucket['keys'].most_common():
             distinct = len(bucket['values'].get(key, ()))
             flags = []
-            if key in contract.REDUNDANT_METADATA_KEYS:
+            if key in policy.REDUNDANT_METADATA_KEYS:
                 flags.append('❌ 与列重复')
-            elif key in contract.RESERVED_JSON_NAMES:
+            elif key in policy.SHARED_JSON_KEYS:
                 flags.append('✅ 公共保留名')
-            elif key in contract.KNOWN_CHANNEL_KEYS:
+            elif key in policy.OBSERVED_CHANNEL_KEYS:
                 flags.append('· 渠道私有')
             else:
                 flags.append('? 未登记')
@@ -84,18 +86,18 @@ def report(per_channel):
                   % (key, count, rows, distinct, ' '.join(flags)))
         print()
 
-    print('=== 契约问题汇总 ===\n')
+    print('=== 与列重复的键（唯一那条纪律）===\n')
     problems = 0
     for message_type in sorted(per_channel):
         bucket = per_channel[message_type]
         for key, count in sorted(bucket['keys'].items()):
-            if key in contract.REDUNDANT_METADATA_KEYS:
+            if key in policy.REDUNDANT_METADATA_KEYS:
                 problems += 1
                 print('  [%s] metadata.%s 出现 %d 次 —— %s'
                       % (message_type, key, count,
-                         contract.REDUNDANT_METADATA_KEYS[key]))
+                         policy.REDUNDANT_METADATA_KEYS[key]))
     if not problems:
-        print('  没有与列重复的 key 🎉')
+        print('  没有与列重复的键 🎉')
 
     print('\n=== 埋在 JSON 里、最值得做"逃生舱"筛选的维度 ===\n')
     ranked = []
@@ -106,8 +108,8 @@ def report(per_channel):
             distinct = len(bucket['values'].get(key, ()))
             # Skip what a column already covers (those are not filter gaps), the
             # redundant copies, and the dedup ids.
-            if (key in contract.COMMON_FIELDS
-                    or key in contract.REDUNDANT_METADATA_KEYS
+            if (key in policy.CORE_COLUMNS
+                    or key in policy.REDUNDANT_METADATA_KEYS
                     or key in ('message_id', 'notification_id')):
                 continue
             ranked.append((count / rows, distinct, message_type, key))
@@ -121,19 +123,27 @@ def report(per_channel):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('--contract', action='store_true',
-                        help='also print the field contract')
+    parser.add_argument('--policy', action='store_true',
+                        help='also print the metadata policy')
     parser.add_argument('--limit', type=int, default=None,
                         help='only inspect the first N messages')
     args = parser.parse_args()
 
-    if args.contract:
-        print(contract.describe_contract())
+    if args.policy:
+        print(policy.describe_policy())
         print()
 
     app = create_app()
-    with app.app_context():
-        per_channel = collect(args.limit)
+    try:
+        with app.app_context():
+            per_channel = collect(args.limit)
+    except OperationalError as exc:
+        # An empty local dev database is a normal thing to hit — say so plainly
+        # instead of dumping a SQLAlchemy traceback.
+        print('读不到 messages 表：%s' % exc.orig)
+        print('数据库：%s' % app.config.get('SQLALCHEMY_DATABASE_URI'))
+        print('（本地开发库可能是空的：先跑一次 `python app.py` 或初始化脚本建表）')
+        return 1
     report(per_channel)
     return 0
 
