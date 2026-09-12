@@ -12,6 +12,55 @@
     </div>
 </div>
 
+<!-- Mobile app (APK) distribution -->
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-phone"></i> Mobile App (APK)
+                </h5>
+            </div>
+            <div class="card-body">
+                {% if releases %}
+                <p class="text-muted small">
+                    Open these links <strong>on the phone</strong> to download and install.
+                    Installing over an existing build with the same signature keeps your data.
+                </p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle">
+                        <thead>
+                            <tr><th>File</th><th>Size</th><th>Uploaded</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            {% for r in releases %}
+                            <tr>
+                                <td><code>{{ r.name }}</code></td>
+                                <td>{{ r.size_mb }} MB</td>
+                                <td class="small text-muted">
+                                    <span data-utc="{{ r.mtime|utc_iso }}" data-fmt="datetime">{{ r.mtime.strftime('%Y-%m-%d %H:%M') }}</span>
+                                </td>
+                                <td class="text-end">
+                                    <a href="{{ url_for('web.download_release', filename=r.name) }}"
+                                       class="btn btn-outline-primary btn-sm">
+                                        <i class="bi bi-download"></i> Download
+                                    </a>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted mb-0">
+                    No APK uploaded yet. Builds are placed in <code>instance/releases/</code> on the server.
+                </p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
 <!-- API Keys Card -->
 <div class="row">
     <div class="col-lg-8">

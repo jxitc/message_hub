@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Crash Reports - Message Hub{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-12">
+        <h1 class="display-6 mb-0">
+            <i class="bi bi-bug"></i> Crash Reports
+        </h1>
+        <p class="text-muted">
+            Uploaded automatically by the client app (Java uncaught exceptions and native
+            crashes / ANRs via ApplicationExitInfo). {{ total }} report(s) stored.
+        </p>
+    </div>
+</div>
+
+{% if not reports %}
+<div class="row">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-body text-center py-5">
+                <i class="bi bi-emoji-smile fs-1 text-success d-block mb-3"></i>
+                <h5>No crashes reported</h5>
+                <p class="text-muted mb-0">Nothing has been uploaded yet.</p>
+            </div>
+        </div>
+    </div>
+</div>
+{% else %}
+<div class="row">
+    <div class="col-12">
+        {% for r in reports %}
+        <div class="card mb-3">
+            <div class="card-header d-flex flex-wrap align-items-center gap-2">
+                <span class="badge {% if r.reason == 'CRASH_NATIVE' %}bg-danger{% elif r.reason == 'ANR' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                    {{ r.reason }}
+                </span>
+                {% if dup_counts.get(r.fingerprint, 1) > 1 %}
+                <span class="badge bg-info text-dark" title="Same crash signature">
+                    ×{{ dup_counts.get(r.fingerprint) }}
+                </span>
+                {% endif %}
+                <span class="flex-grow-1 text-truncate">
+                    <strong>{{ r.summary or '(no summary)' }}</strong>
+                </span>
+                <small class="text-muted">
+                    <span data-utc="{{ r.received_at|utc_iso }}" data-fmt="datetime">{{ r.received_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                </small>
+            </div>
+            <div class="card-body">
+                <div class="row small mb-2">
+                    <div class="col-md-3"><span class="text-muted">Device:</span> {{ r.device_model or '?' }} / Android {{ r.android_version or '?' }}</div>
+                    <div class="col-md-3"><span class="text-muted">App:</span> {{ r.app_version or '?' }} ({{ r.build_type or '?' }})</div>
+                    <div class="col-md-3"><span class="text-muted">Source:</span> {{ r.source_device_id }}</div>
+                    <div class="col-md-3"><span class="text-muted">Reason code:</span> {{ r.reason_code if r.reason_code is not none else '?' }}</div>
+                </div>
+                {% if r.occurred_at %}
+                <div class="small text-muted mb-2">
+                    Occurred:
+                    <span data-utc="{{ r.occurred_at|utc_iso }}" data-fmt="datetime">{{ r.occurred_at.strftime('%Y-%m-%d %H:%M:%S') }}</span>
+                </div>
+                {% endif %}
+                {% if r.stacktrace %}
+                <details>
+                    <summary class="small text-muted" style="cursor:pointer;">Show stack trace</summary>
+                    <div class="p-3 mh-panel mt-2">
+                        <pre class="mb-0"><code>{{ r.stacktrace }}</code></pre>
+                    </div>
+                </details>
+                {% else %}
+                <p class="text-muted small mb-0">No stack trace captured.</p>
+                {% endif %}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+{% endblock %}

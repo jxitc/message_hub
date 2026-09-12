@@ -24,6 +24,11 @@ def require_api_key():
     If no key material exists at all the API runs WITHOUT auth and logs a
     warning — dev/test only; production must have at least one key.
     """
+    # APK 下载由手机浏览器直接打开链接（无法携带 header），有意豁免鉴权。
+    # 只有 GET 下载豁免；列表 /api/v1/releases 仍需 key。见 api/v1/releases.py
+    if request.method == 'GET' and request.path.startswith('/api/v1/releases/'):
+        return None
+
     provided = (request.headers.get('X-API-Key') or '').strip()
     if provided:
         h = _hash_key(provided)
@@ -61,4 +66,4 @@ def require_api_key():
                     'message': 'Invalid or missing API key'}), 401
 
 
-from . import messages, devices, sync
+from . import messages, devices, sync, diagnostics, releases

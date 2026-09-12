@@ -1,4 +1,4 @@
-from flask import render_template, request, jsonify, flash, redirect, url_for
+from flask import render_template, request, jsonify, flash, redirect, url_for, current_app
 from sqlalchemy import desc, func
 from datetime import datetime, timezone, timedelta
 from models import db, Message, Device
@@ -309,7 +309,8 @@ def settings():
     from flask import current_app as _app
     legacy_configured = bool((_app.config.get('API_KEY') or '').strip())
     return render_template('settings.html', keys=keys,
-                           legacy_configured=legacy_configured)
+                           legacy_configured=legacy_configured,
+                           releases=_list_releases())
 
 
 @web.route('/settings/api-keys/generate', methods=['POST'])
@@ -347,3 +348,67 @@ def revoke_api_key(key_id):
         db.session.commit()
         flash(f'API key "{ak.name}" revoked', 'success')
     return redirect(url_for('web.settings'))
+
+# ---------------------------------------------------------------------------
+# Crash reports (uploaded by the Android client; see api/v1/diagnostics.py)
+# ---------------------------------------------------------------------------
+
+from models import CrashReport as CrashReportModel
+
+
+@web.route('/crashes')
+def crashes():
+    """Crash reports uploaded by client apps — full stack traces inline."""
+    limit = min(int(request.args.get('limit', 50)), 200)
+    reports = (CrashReportModel.query
+               .order_by(desc(CrashReportModel.received_at))
+               .limit(limit).all())
+    total = CrashReportModel.query.count()
+
+    # group counts by fingerprint so repeated crashes are obvious
+    from sqlalchemy import func as _func
+    grouped = (db.session.query(CrashReportModel.fingerprint,
+                                _func.count(CrashReportModel.id))
+               .group_by(CrashReportModel.fingerprint).all())
+    dup_counts = {fp: n for fp, n in grouped if fp}
+
+    return render_template('crashes.html', reports=reports, total=total,
+                           dup_counts=dup_counts)
+
+
+# ---------------------------------------------------------------------------
+# APK distribution: files live in instance/releases/ (that dir is excluded
+# from the rsync deploy, so `--delete` never wipes uploaded builds).
+# ---------------------------------------------------------------------------
+
+import os as _os
+from flask import send_from_directory as _send_from_directory
+
+
+def _releases_dir():
+    path = _os.path.join(current_app.instance_path, 'releases')
+    _os.makedirs(path, exist_ok=True)
+    return path
+
+
+@web.route('/downloads/<path:filename>')
+def download_release(filename):
+    """Serve an uploaded APK (or other release artifact) for phone download."""
+    return _send_from_directory(_releases_dir(), filename, as_attachment=True)
+
+
+def _list_releases():
+    """Newest-first list of (filename, size_mb, mtime) for the Settings page."""
+    from datetime import datetime as _dt
+    out = []
+    for name in _os.listdir(_releases_dir()):
+        if not name.lower().endswith('.apk'):
+            continue
+        full = _os.path.join(_releases_dir(), name)
+        st = _os.stat(full)
+        out.append({
+            'name': name,
+            'size_mb': round(st.st_size / 1048576, 1),
+            'mtime': _dt.fromtimestamp(st.st_mtime),
+        })
+    return sorted(out, key=lambda r: r['mtime'], reverse=True)
