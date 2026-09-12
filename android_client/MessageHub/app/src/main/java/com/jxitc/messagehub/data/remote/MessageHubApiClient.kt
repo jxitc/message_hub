@@ -166,7 +166,7 @@ class MessageHubApiClient(
 
     private fun MemoryCreationRequest.toMessageCreateRequest(): MessageCreateRequest {
         return MessageCreateRequest(
-            sourceDeviceId = SOURCE_DEVICE_ID,
+            sourceDeviceId = preferences.deviceId,
             type = MessageMapper.mapToMessageType(sourceType, metadata),
             sender = MessageMapper.resolveSender(metadata),
             content = content,
@@ -191,7 +191,7 @@ class MessageHubApiClient(
     }
 
     companion object {
-        /** Device id reported to MH. TODO: replace with a registered device id (MH device registration is a stretch goal). */
-        private const val SOURCE_DEVICE_ID = "android-phone-1"
+        // source_device_id 来自 AppPreferences.deviceId（每台设备首次运行生成并持久化），
+        // 不再硬编码：多台设备接入时，硬编码会让所有设备的数据混在同一个名字下。
     }
 }

@@ -42,6 +42,9 @@ object CrashReporter {
     private const val TAG = "CrashReporter"
     private const val MAX_TRACE_CHARS = 200_000             // 保护：异常大的 trace 截断
 
+    /** 由 install() 注入；崩溃回调里用它取 deviceId（每台设备唯一、可读）。 */
+    @Volatile private var prefs: AppPreferences? = null
+
     private val http by lazy {
         OkHttpClient.Builder()
             .connectTimeout(15, TimeUnit.SECONDS)
@@ -55,7 +58,8 @@ object CrashReporter {
     // ------------------------------------------------------------------
 
     /** 在 Application.onCreate 调用一次。 */
-    fun install(context: Context) {
+    fun install(context: Context, preferences: AppPreferences) {
+        prefs = preferences
         val app = context.applicationContext
         val previous = Thread.getDefaultUncaughtExceptionHandler()
         Thread.setDefaultUncaughtExceptionHandler { thread, throwable ->
@@ -216,7 +220,7 @@ object CrashReporter {
         val reportId = "crash-$occurredAtMillis-$reason"
 
         val json = JSONObject().apply {
-            put("source_device_id", "android-phone-1")
+            put("source_device_id", prefs?.deviceId ?: "unknown-device")
             put("reason", reason)
             reasonCode?.let { put("reason_code", it) }
             put("summary", summary)

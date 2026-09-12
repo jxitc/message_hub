@@ -25,7 +25,7 @@ class MessageHubApplication : Application() {
         // 初始化手机端文件日志(持久化, 被杀后仍可读取)
         Logger.init(this)
         // 崩溃采集：Java 未捕获异常处理器（越早装越好）
-        CrashReporter.install(this)
+        CrashReporter.install(this, appContainer.appPreferences)
         // 启动前台保活服务，避免 OPPO/ColorOS 杀后台导致错过通知/短信采集
         val intent = Intent(this, KeepAliveService::class.java)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
