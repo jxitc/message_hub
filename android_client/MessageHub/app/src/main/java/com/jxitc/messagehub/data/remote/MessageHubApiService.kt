@@ -10,6 +10,7 @@ import retrofit2.http.*
  * MH endpoints:
  *  - POST /api/v1/messages   -> report one message (201 + {"message","id","data"})
  *  - GET  /api/v1/messages   -> list messages with pagination
+ *  - GET  /api/v1/messages/<id> -> one message (attachment extraction status)
  *  - GET  /api/v1/attachments/limits -> attachment size cap + allowed types
  *  - GET  /health            -> health check {"status":"healthy",...}
  */
@@ -35,6 +36,17 @@ interface MessageHubApiService {
     /** 附件上限与允许类型，客户端不写死。 */
     @GET("api/v1/attachments/limits")
     suspend fun getAttachmentLimits(): Response<AttachmentLimitsResponse>
+
+    /**
+     * 单条消息（含附件的提取状态）：
+     * `GET /api/v1/messages/<id>` → `{id, content, metadata:{attachments:[…]}}`。
+     *
+     * 附件在这个接口里位于 **`metadata.attachments`**（与上传响应的顶层 `attachments` 不同）。
+     */
+    @GET("api/v1/messages/{id}")
+    suspend fun getMessage(
+        @Path("id") id: String
+    ): Response<MessageDetailApiData>
 
     @GET("api/v1/messages")
     suspend fun getMessages(

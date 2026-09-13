@@ -398,4 +398,27 @@ Time:...`），显示层又要剥一遍，冗余不正式。
   `sender=PHZ110`（设备名，符合设计）、560KB 的 JPEG **原样上传未重编码**、
   服务端 `tesseract` 提取 928 字、因正文已有用户输入所以**未覆盖正文**而是留在附件记录里
   —— 四条设计规则全部命中。中文 OCR 在真实截图上把关键文字与数字全部识别正确。
+## 2026-09-13（安卓端附件预览：轮询提取状态 + 缩略图 + 离线文本）
+
+- **需求**（用户）：手机端也要能看附件；解析在服务端做，所以流程是"上传 → 查服务端提取状态
+  → 完成后拉下来"。**结论：现有接口就够，不需要新接口**（用户也选择了不加 pending 列表接口）。
+- **客户端实现**（`android_client/**`）：附件列表（名称/人类可读大小/类型/状态徽标）、
+  图片缩略图（Coil 2.7.0 复用带 `X-API-Key` 的 OkHttpClient + 磁盘缓存，`respectCacheHeaders(false)`
+  以免服务端没给 `Cache-Control` 时缓存根本不写）、上传后轮询 `GET /api/v1/messages/<id>`
+  （退避 3/5/10/20s → 每 30s，3 分钟上限，连续 3 次失败即停，页面不可见即停）、
+  提取文本可复制并标明来源、`attachments_skipped` 带原因列出、非图片原件可下载后用系统应用打开。
+- **两条防坑措施写进了代码结构**（都是这轮讨论中明确的坑）：
+  ① `AttachmentUrls.shouldAttachApiKey()` 让 API key **只发给配置的 API 主机**（并归一默认端口），
+     从结构上避免 key 被发去独立 blob 域；`ServerAttachment` 领域模型**根本不保留 `url` 字段**，
+     编译期杜绝误用（下载一律 `key + serverUrl`）。
+  ② 提取文本的**两处落位**（`content` 与 `extraction.text`）按规则判定，并处理
+     "`applied_to_content` 为真但本地正文为空（快照旧）"的回退，避免文本丢失。
+- **Room 1 → 2 迁移**：四条可空列（`serverMessageId`/`attachmentsJson`/`skippedAttachmentsJson`/
+  `attachmentsSyncedAt`），既有数据不动；**移除了 `fallbackToDestructiveMigration()`**（它会在未处理
+  的版本变化上清库）。字节不入库，只存元信息 + 提取文本。
+- **验证**：`assembleDebug` 成功（APK 26,246,883 B）；**单测 145 例 / 0 失败**（从 JUnit XML 报告核对，
+  新增 48 例：文本落位 19、URL 拼接 10、轮询循环 8、JSON 编解码 6、退避表 5）；
+  已发布 **1.6.4 (code 12)**，线上包与本地构建 `cmp` 字节一致。
+- **未验证（无 USB/真机）**：缩略图真实加载、端到端提取显示、FileProvider 打开原件、
+  真机 Room v1→v2 运行时迁移 —— 只能靠用户装 1.6.4 后实测。
 

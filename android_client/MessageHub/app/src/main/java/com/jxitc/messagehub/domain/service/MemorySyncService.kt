@@ -97,6 +97,10 @@ class MemorySyncService(
                 is ProcessingResult.Success -> {
                     // Successfully uploaded - mark as uploaded in local database
                     memoryRepository.updateMemoryUploadStatus(memory.id, true)
+                    // 顺手记下服务器 id：以后要查这条消息的附件/提取状态就靠它。
+                    result.data.serverMessageId?.let { serverId ->
+                        memoryRepository.attachServerMessageId(memory.id, serverId)
+                    }
                     Logger.d("MemorySyncService", "Memory ${memory.id} uploaded successfully on attempt ${attempt + 1}")
                     return true
                 }

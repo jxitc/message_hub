@@ -9,12 +9,16 @@ import com.jxitc.messagehub.domain.model.Attachment
 import com.jxitc.messagehub.domain.model.AttachmentLimits
 import com.jxitc.messagehub.domain.model.Memory
 import com.jxitc.messagehub.domain.model.MemoryCreationRequest
+import com.jxitc.messagehub.domain.model.MessageAttachmentDetail
 import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.domain.model.SourceType
+import com.jxitc.messagehub.domain.service.AttachmentExtractionPoller
 import com.jxitc.messagehub.domain.service.AttachmentPolicy
+import com.jxitc.messagehub.domain.service.PollOutcome
 import com.jxitc.messagehub.domain.usecase.CreateMemoryUseCase
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.utils.Logger
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -28,11 +32,31 @@ class AddMemoryViewModel(
     private val attachmentPreparer: AttachmentPreparer
 ) : BaseViewModel() {
 
+    /** 上传后"等提取结果"的追踪状态（页面可见时轮询，不可见即停）。 */
+    enum class TrackingState { RUNNING, SETTLED, TIMED_OUT, FAILED, STOPPED }
+
+    data class ExtractionTracking(
+        val serverMessageId: String,
+        val attachmentCount: Int,
+        val state: TrackingState = TrackingState.RUNNING
+    ) {
+        val finished: Boolean get() = state != TrackingState.RUNNING
+    }
+
     private val _content = MutableStateFlow("")
     val content: StateFlow<String> = _content.asStateFlow()
 
     private val _isSubmitted = MutableStateFlow(false)
     val isSubmitted: StateFlow<Boolean> = _isSubmitted.asStateFlow()
+
+    /** 上传成功后的提取追踪；null 表示这次提交没有附件要等（页面可以立刻返回）。 */
+    private val _tracking = MutableStateFlow<ExtractionTracking?>(null)
+    val tracking: StateFlow<ExtractionTracking?> = _tracking.asStateFlow()
+
+    /** 页面是否可见（Compose 侧设置）：不可见就停止轮询。 */
+    @Volatile
+    private var screenVisible = false
+    private var trackingJob: Job? = null
 
     /** 已选中并可上传的附件（该压的已经压好了）。 */
     private val _attachments = MutableStateFlow<List<Attachment>>(emptyList())
@@ -194,7 +218,7 @@ class AddMemoryViewModel(
                         } else {
                             request
                         }
-                        when (val local = persistLocalCopy(localRequest)) {
+                        when (val local = persistLocalCopy(localRequest, serverResult.data)) {
                             is ProcessingResult.Success -> local
                             is ProcessingResult.Error -> {
                                 Logger.w("Server saved the memory but local copy failed: ${local.message}")
@@ -212,8 +236,25 @@ class AddMemoryViewModel(
             },
             onSuccess = { memory ->
                 Logger.i("Memory with ${attachments.size} attachment(s) uploaded, id=${memory.id}")
-                _isSubmitted.value = true
                 resetInput()
+                // 服务器按类型拒掉的文件（多文件里只坏一个时其余照常入库）。
+                // 不走 skippedAttachments：那一栏是服务端 metadata 里的
+                // `attachments_skipped`（邮件侧的"有附件没存下来"），第一次轮询拉详情时
+                // 会被服务端内容覆盖 —— 在这里提示一句更直接也更稳。
+                val rejected = memory.skippedAttachments
+                if (rejected.isNotEmpty()) {
+                    _notice.value = "服务器拒收了 ${rejected.size} 个文件：" + rejected.joinToString("；") {
+                        it.name + (it.reason?.let { r -> "（$r）" } ?: "")
+                    }
+                }
+                // 附件在服务器上还要跑 OCR/PDF 提取（异步）。页面可见时按退避轮询到终态；
+                // 页面一离开就停（列表页可见时会接着轮询，见 MemoryListViewModel）。
+                val serverId = memory.serverMessageId
+                if (serverId != null && memory.attachments.isNotEmpty()) {
+                    _tracking.value = ExtractionTracking(serverId, memory.attachments.size)
+                    startExtractionTracking(serverId)
+                }
+                _isSubmitted.value = true
             }
         )
     }
@@ -227,7 +268,7 @@ class AddMemoryViewModel(
                 when (val serverResult = apiClient.createMemory(request)) {
                     is ProcessingResult.Success -> {
                         Logger.i("Server upload successful, saving locally...")
-                        when (val local = persistLocalCopy(request)) {
+                        when (val local = persistLocalCopy(request, serverResult.data)) {
                             is ProcessingResult.Success -> local
                             is ProcessingResult.Error -> {
                                 // 本地留档失败，但服务器已经存下了 —— 不因为本地失败就报错
@@ -267,21 +308,99 @@ class AddMemoryViewModel(
     /**
      * 服务器已经成功之后，在本地留一条已上传的记录。
      * 返回 Error 表示本地没留成 —— 调用方自己决定要不要因此改变整体结果。
+     *
+     * [serverResult] 非空时把服务器消息 id 与上传响应里带的附件（初始 `pending` 状态）
+     * 一起落到本地：这样用户一回到列表就能看到"附件 + 提取中"，
+     * 不必等第一次轮询回来才知道附件到底存没存上。
      */
-    private suspend fun persistLocalCopy(request: MemoryCreationRequest): ProcessingResult<Memory> {
+    private suspend fun persistLocalCopy(
+        request: MemoryCreationRequest,
+        serverResult: Memory? = null
+    ): ProcessingResult<Memory> {
         val localResult = createMemoryUseCase.execute(request)
         if (localResult !is ProcessingResult.Success) return localResult
-        return when (val update = memoryRepository.updateMemoryUploadStatus(localResult.data.id, true)) {
-            is ProcessingResult.Success -> {
-                Logger.i("Local copy saved and marked uploaded: id=${localResult.data.id}")
-                ProcessingResult.Success(localResult.data.copy(isUploaded = true))
-            }
-            is ProcessingResult.Error -> {
-                Logger.e("Failed to update upload status: ${update.message}")
-                ProcessingResult.Success(localResult.data.copy(isUploaded = true))
-            }
-            ProcessingResult.Loading -> ProcessingResult.Success(localResult.data.copy(isUploaded = true))
+
+        val update = memoryRepository.updateMemoryUploadStatus(localResult.data.id, true)
+        if (update is ProcessingResult.Error) {
+            Logger.e("Failed to update upload status: ${update.message}")
         }
+
+        val serverId = serverResult?.serverMessageId
+        if (serverId != null) {
+            when (val attach = memoryRepository.attachServerMessageId(localResult.data.id, serverId)) {
+                is ProcessingResult.Error -> Logger.w("Failed to store server id: ${attach.message}")
+                else -> Unit
+            }
+            val initial = serverResult?.attachments.orEmpty()
+            if (initial.isNotEmpty()) {
+                // 复用"保存一次消息详情"的同一路径，避免两份写库逻辑。
+                // skipped 传空：上传响应的 `rejected` 不是 metadata 里的
+                // `attachments_skipped`，它由 onSuccess 里的提示直接告诉用户。
+                memoryRepository.saveAttachmentDetail(
+                    MessageAttachmentDetail(
+                        serverMessageId = serverId,
+                        content = request.content,
+                        attachments = initial,
+                        skipped = emptyList()
+                    )
+                )
+            }
+        }
+
+        Logger.i("Local copy saved and marked uploaded: id=${localResult.data.id}, serverId=$serverId")
+        return ProcessingResult.Success(localResult.data.copy(isUploaded = true))
+    }
+
+    // ------------------------------------------------------------------
+    // 提取状态追踪（页面可见时轮询）
+    // ------------------------------------------------------------------
+
+    private fun startExtractionTracking(serverId: String) {
+        trackingJob?.cancel()
+        trackingJob = viewModelScope.launch(exceptionHandler) {
+            val poller = AttachmentExtractionPoller(
+                fetch = { apiClient.fetchMessageDetail(it) },
+                persist = { memoryRepository.saveAttachmentDetail(it) }
+            )
+            val outcome = poller.poll(serverId, isVisible = { screenVisible })
+            Logger.i("Attachment extraction polling finished for $serverId: $outcome")
+            val state = when (outcome) {
+                is PollOutcome.Settled -> TrackingState.SETTLED
+                is PollOutcome.TimedOut -> TrackingState.TIMED_OUT
+                is PollOutcome.Failed -> TrackingState.FAILED
+                is PollOutcome.Stopped -> TrackingState.STOPPED
+            }
+            _tracking.value = _tracking.value?.copy(state = state)
+        }
+    }
+
+    /** Compose 侧：页面进入可见状态。 */
+    fun onScreenVisible() {
+        screenVisible = true
+    }
+
+    /**
+     * Compose 侧：页面不可见（离开/销毁）。
+     * **停止轮询**：不可见的页面没有任何理由继续问服务器。
+     */
+    fun onScreenHidden() {
+        screenVisible = false
+        trackingJob?.cancel()
+        trackingJob = null
+    }
+
+    /** 用户不想等提取结果了：停止轮询并让页面返回。 */
+    fun skipTracking() {
+        trackingJob?.cancel()
+        trackingJob = null
+        _tracking.value = _tracking.value?.copy(state = TrackingState.STOPPED)
+    }
+
+    /** 追踪结束（返回列表前清掉状态，避免再次进入时显示上一次的残留）。 */
+    fun clearTracking() {
+        trackingJob?.cancel()
+        trackingJob = null
+        _tracking.value = null
     }
 
     private fun submitToLocalOnly(request: MemoryCreationRequest) {

@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- FileProvider 暴露给系统安装器的路径（仅应用内更新下载的 APK） -->
+<!-- FileProvider 暴露给系统安装器 / 附件查看器的路径 -->
 <paths>
+    <!-- 应用内更新下载的 APK -->
     <cache-path name="updates" path="updates/" />
+    <!-- 附件原件（PDF/文本等），按需下载后交给系统查看器 -->
+    <cache-path name="attachments" path="attachments/" />
 </paths>

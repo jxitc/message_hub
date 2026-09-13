@@ -1,7 +1,11 @@
 package com.jxitc.messagehub.di
 
 import android.content.Context
+import coil.ImageLoader
+import coil.disk.DiskCache
+import coil.memory.MemoryCache
 import com.jxitc.messagehub.data.attachment.AndroidImageEncoder
+import com.jxitc.messagehub.data.attachment.AttachmentDownloader
 import com.jxitc.messagehub.data.attachment.AttachmentPreparer
 import com.jxitc.messagehub.data.attachment.AttachmentReader
 import com.jxitc.messagehub.data.database.MessageHubDatabase
@@ -38,6 +42,41 @@ class AppContainer(private val context: Context) {
     /** 应用内自动更新（检查版本 / 下载 APK / 拉起安装器） */
     val updateChecker by lazy {
         UpdateChecker(context.applicationContext, appPreferences)
+    }
+
+    /**
+     * 图片加载器（Coil）：附件缩略图用。
+     *
+     * 三个关键点：
+     *  - **共用 API 客户端**：`/api/v1/blobs/<key>` 需要 `X-API-Key`，而鉴权只在那个
+     *    OkHttpClient 的拦截器里；另起一个客户端就会 401。
+     *  - **磁盘缓存**：附件按内容寻址（key 里就是 sha256），内容不可变 —— 缓存一次就够了，
+     *    反复打开列表不该反复下载。响应头不一定给 `Cache-Control`，所以关掉"按响应头判断
+     *    可缓存性"，否则磁盘缓存可能根本不写入。
+     *  - **内存缓存**：滚动时不用反复解码。
+     */
+    val imageLoader: ImageLoader by lazy {
+        ImageLoader.Builder(context.applicationContext)
+            .callFactory { apiClient.httpClient }
+            .memoryCache {
+                MemoryCache.Builder(context.applicationContext)
+                    .maxSizePercent(0.2)
+                    .build()
+            }
+            .diskCache {
+                DiskCache.Builder()
+                    .directory(context.applicationContext.cacheDir.resolve(IMAGE_CACHE_DIR))
+                    .maxSizeBytes(64L * 1024 * 1024)
+                    .build()
+            }
+            .respectCacheHeaders(false)
+            .crossfade(true)
+            .build()
+    }
+
+    /** 附件原件（PDF/文本等）的按需下载：只落在 cacheDir，不进数据库。 */
+    val attachmentDownloader: AttachmentDownloader by lazy {
+        AttachmentDownloader(context.applicationContext, apiClient)
     }
     
     val memoryRepository: MemoryRepository by lazy {
@@ -94,10 +133,15 @@ class AppContainer(private val context: Context) {
     }
     
     fun createMemoryListViewModel(): MemoryListViewModel {
-        return MemoryListViewModel(getMemoriesUseCase, syncService)
+        return MemoryListViewModel(getMemoriesUseCase, syncService, apiClient, memoryRepository)
     }
     
     fun createSettingsViewModel(): SettingsViewModel {
         return SettingsViewModel(appPreferences, apiClient, updateChecker)
+    }
+
+    companion object {
+        /** Coil 磁盘缓存目录（cacheDir 下，系统可回收）。 */
+        private const val IMAGE_CACHE_DIR = "image_cache"
     }
 }

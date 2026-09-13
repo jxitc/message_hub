@@ -13,8 +13,8 @@ android {
         applicationId = "com.jxitc.messagehub"
         minSdk = 24
         targetSdk = 36
-        versionCode = 11
-        versionName = "1.6.3"
+        versionCode = 12
+        versionName = "1.6.4"
 
         // 只打包真机需要的 ABI。debug 包默认把 4 种架构的 native 库全塞进来
         // （x86/x86_64 是模拟器用的，armeabi-v7a 是老 32 位机），实测某含 ML Kit
@@ -106,6 +106,9 @@ dependencies {
     
     // JSON parsing
     implementation(libs.gson)
+
+    // 附件缩略图：Coil（图片加载 + 磁盘缓存 + 可注入带 X-API-Key 的 OkHttp 客户端）
+    implementation(libs.coil.compose)
     
     // Testing dependencies
     testImplementation(libs.junit)

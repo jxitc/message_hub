@@ -12,17 +12,20 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.presentation.screen.AddMemoryScreen
 import com.jxitc.messagehub.presentation.screen.MemoryListScreen
 import com.jxitc.messagehub.presentation.screen.SettingsScreen
 import com.jxitc.messagehub.ui.theme.MessageHubTheme
 import com.jxitc.messagehub.utils.PermissionHelper
 import com.jxitc.messagehub.utils.Logger
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     
@@ -90,6 +93,7 @@ fun MessageHubApp(
             composable("memory_list") {
                 val viewModel = remember { appContainer.createMemoryListViewModel() }
                 val context = LocalContext.current
+                val scope = rememberCoroutineScope()
                 // 长按屏蔽/取消屏蔽 app：写入黑名单(SharedPreferences) + Toast; 只拦新通知, 旧记录保留
                 var blockedApps by remember { mutableStateOf(appContainer.appPreferences.blockedApps) }
                 MemoryListScreen(
@@ -111,6 +115,26 @@ fun MessageHubApp(
                     },
                     onNavigateToSettings = {
                         navController.navigate("settings")
+                    },
+                    // 附件原件的地址一律用 key + 配置的 serverUrl 拼（不用接口返回的 url）
+                    blobUrlFor = appContainer.apiClient::blobUrlFor,
+                    onOpenOriginal = { attachment ->
+                        scope.launch {
+                            when (val result = appContainer.attachmentDownloader.download(attachment)) {
+                                is ProcessingResult.Success -> {
+                                    val intent = appContainer.attachmentDownloader
+                                        .viewIntent(result.data, attachment)
+                                    if (intent == null) {
+                                        Toast.makeText(context, "没有能打开这个类型的应用", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        context.startActivity(intent)
+                                    }
+                                }
+                                is ProcessingResult.Error ->
+                                    Toast.makeText(context, result.message, Toast.LENGTH_LONG).show()
+                                ProcessingResult.Loading -> Unit
+                            }
+                        }
                     }
                 )
             }

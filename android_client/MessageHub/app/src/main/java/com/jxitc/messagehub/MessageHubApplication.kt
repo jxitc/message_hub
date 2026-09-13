@@ -3,6 +3,8 @@ package com.jxitc.messagehub
 import android.app.Application
 import android.content.Intent
 import android.os.Build
+import coil.ImageLoader
+import coil.ImageLoaderFactory
 import com.jxitc.messagehub.di.AppContainer
 import com.jxitc.messagehub.service.KeepAliveService
 import com.jxitc.messagehub.utils.CrashReporter
@@ -12,11 +14,18 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-class MessageHubApplication : Application() {
+class MessageHubApplication : Application(), ImageLoaderFactory {
 
     val appContainer: AppContainer by lazy {
         AppContainer(this)
     }
+
+    /**
+     * 图片加载器交给 Coil 的单例入口：附件缩略图必须带着 `X-API-Key` 去
+     * `{serverUrl}/api/v1/blobs/<key>` 取，而这个客户端在 [AppContainer] 里配置
+     * （共用 API 的 OkHttpClient + 磁盘缓存）。
+     */
+    override fun newImageLoader(): ImageLoader = appContainer.imageLoader
 
     private val backgroundScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 

@@ -8,6 +8,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
@@ -22,13 +23,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.graphics.drawable.toBitmap
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.provider.Telephony
+import android.widget.Toast
 import com.jxitc.messagehub.domain.model.Memory
 import com.jxitc.messagehub.domain.model.SourceType
 import com.jxitc.messagehub.presentation.viewmodel.MemoryListViewModel
@@ -50,12 +55,24 @@ fun MemoryListScreen(
     onNavigateToAddMemory: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
     blockedApps: Set<String> = emptySet(),
-    onToggleBlock: (String) -> Unit = {}
+    onToggleBlock: (String) -> Unit = {},
+    /** 附件下载地址一律用 key + serverUrl 拼（见 AttachmentUrls），所以在页面里传入。 */
+    blobUrlFor: (String) -> String = { "" },
+    onOpenOriginal: (com.jxitc.messagehub.domain.model.ServerAttachment) -> Unit = {}
 ) {
     val memories by viewModel.memories.collectAsStateWithLifecycle()
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
+    val isPollingAttachments by viewModel.attachmentPolling.collectAsStateWithLifecycle()
+
+    // 页面可见性驱动附件状态轮询：可见才轮询，离开（进"添加记忆"/切后台）立刻停。
+    // 用 LifecycleResumeEffect 而不是 DisposableEffect：切到别的 app 时 composable 还在，
+    // 但"不可见"必须包含这种情形。
+    LifecycleResumeEffect(Unit) {
+        viewModel.onScreenVisible()
+        onPauseOrDispose { viewModel.onScreenHidden() }
+    }
 
     val isSearchActive = searchQuery.isNotBlank()
 
@@ -117,6 +134,22 @@ fun MemoryListScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
+        // 附件提取轮询提示（只在列表页可见时有值）
+        if (isPollingAttachments) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = "正在等服务器提取附件文本…",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+
         // Content
         Box(modifier = Modifier.fillMaxSize()) {
             when {
@@ -151,9 +184,17 @@ fun MemoryListScreen(
         }
     }
 
-    // 详情对话框
-    selectedMemory?.let { memory ->
-        MemoryDetailDialog(memory = memory, onDismiss = { selectedMemory = null })
+    // 详情对话框。用内存里的最新一份（Room 更新后列表会刷新，selectedMemory 是快照），
+    // 这样附件状态轮询的结果会实时反映在打开着的详情里。
+    selectedMemory?.let { snapshot ->
+        val memory = memories.firstOrNull { it.id == snapshot.id } ?: snapshot
+        MemoryDetailDialog(
+            memory = memory,
+            onDismiss = { selectedMemory = null },
+            blobUrlFor = blobUrlFor,
+            onOpenOriginal = onOpenOriginal,
+            onRefreshAttachments = { viewModel.refreshAttachmentStatus(memory.serverMessageId) }
+        )
     }
 }
 
@@ -404,13 +445,40 @@ private fun EmptyMemoriesView(onAddMemory: () -> Unit, modifier: Modifier = Modi
     }
 }
 
-/** 记忆详情对话框: 完整内容 + 来源/时间, 不截断 */
+/**
+ * 记忆详情：完整内容（不截断、可复制）+ 来源/时间 + **附件列表与提取状态**。
+ *
+ * 附件区的规则（缩略图、状态徽标、提取文本落位、未保存附件）都在 [AttachmentSection] 里，
+ * 这里只把它们摆进对话框。
+ */
 @Composable
-private fun MemoryDetailDialog(memory: Memory, onDismiss: () -> Unit) {
+private fun MemoryDetailDialog(
+    memory: Memory,
+    onDismiss: () -> Unit,
+    blobUrlFor: (String) -> String = { "" },
+    onOpenOriginal: (com.jxitc.messagehub.domain.model.ServerAttachment) -> Unit = {},
+    onRefreshAttachments: () -> Unit = {}
+) {
+    val clipboard = LocalClipboardManager.current
+    val context = LocalContext.current
+    val syncedAt = memory.attachmentsSyncedAt
+    val hasAttachments = memory.attachments.isNotEmpty() || memory.skippedAttachments.isNotEmpty()
+
     AlertDialog(
         onDismissRequest = onDismiss,
         confirmButton = {
             TextButton(onClick = onDismiss) { Text("关闭") }
+        },
+        dismissButton = {
+            Row {
+                TextButton(onClick = {
+                    clipboard.setText(AnnotatedString(memory.content))
+                    Toast.makeText(context, "已复制正文", Toast.LENGTH_SHORT).show()
+                }) { Text("复制正文") }
+                if (memory.serverMessageId != null) {
+                    TextButton(onClick = onRefreshAttachments) { Text("刷新附件") }
+                }
+            }
         },
         title = {
             Column {
@@ -420,13 +488,34 @@ private fun MemoryDetailDialog(memory: Memory, onDismiss: () -> Unit) {
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (hasAttachments && syncedAt != null) {
+                    Text(
+                        text = "附件状态更新于 ${syncedAt.format(DateTimeFormatter.ofPattern("HH:mm:ss"))}",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
         },
         text = {
-            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
-                Text(
-                    text = memory.content,
-                    style = MaterialTheme.typography.bodyMedium
+            Column(
+                modifier = Modifier
+                    .verticalScroll(rememberScrollState())
+                    .fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                SelectionContainer {
+                    Text(
+                        text = memory.content,
+                        style = MaterialTheme.typography.bodyMedium
+                    )
+                }
+                AttachmentSection(
+                    attachments = memory.attachments,
+                    skipped = memory.skippedAttachments,
+                    messageContent = memory.content,
+                    blobUrlFor = blobUrlFor,
+                    onOpenOriginal = onOpenOriginal
                 )
             }
         }

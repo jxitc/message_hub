@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.jxitc.messagehub.domain.model.Attachment
 import com.jxitc.messagehub.domain.model.AttachmentKind
@@ -39,8 +40,17 @@ fun AddMemoryScreen(
     val limits by viewModel.limits.collectAsStateWithLifecycle()
     val isPreparing by viewModel.isPreparingAttachments.collectAsStateWithLifecycle()
     val notice by viewModel.notice.collectAsStateWithLifecycle()
+    val tracking by viewModel.tracking.collectAsStateWithLifecycle()
 
     val busy = isLoading || isPreparing
+
+    // 页面可见性：一离开（切后台/返回）就停止轮询附件提取状态。
+    // 用 LifecycleResumeEffect 而不是 DisposableEffect —— 切到别的 app 时 composable
+    // 并没有被销毁，"不可见"必须包含这种情形。
+    LifecycleResumeEffect(Unit) {
+        viewModel.onScreenVisible()
+        onPauseOrDispose { viewModel.onScreenHidden() }
+    }
 
     // 相册：Android Photo Picker（API 33+ 原生；老系统由 androidx 自动回退到
     // ACTION_OPEN_DOCUMENT/GET_CONTENT），可多选。
@@ -64,10 +74,20 @@ fun AddMemoryScreen(
     }
     val maxAttachmentText = remember(limits) { AttachmentPolicy.formatSize(limits.maxBytes) }
 
-    // Handle successful submission
+    // 提交成功后的返回时机：
+    //  - 没有附件要等（tracking == null）→ 立刻返回，保持原来的手感；
+    //  - 有附件 → 留在页面上等提取结果（轮询 3s/5s/10s/20s/30s，上限 3 分钟），
+    //    结束时再返回。"跳过"按钮可以立刻走人（走了之后列表页会接着轮询）。
     LaunchedEffect(isSubmitted) {
-        if (isSubmitted) {
+        if (isSubmitted && viewModel.tracking.value == null) {
             viewModel.resetSubmissionState()
+            onNavigateBack()
+        }
+    }
+    LaunchedEffect(tracking?.state) {
+        if (tracking?.finished == true) {
+            viewModel.resetSubmissionState()
+            viewModel.clearTracking()
             onNavigateBack()
         }
     }
@@ -167,6 +187,37 @@ fun AddMemoryScreen(
             }
         }
 
+        // 上传成功后在等服务器提取文本（附件是异步处理的）
+        tracking?.let { state ->
+            Card(
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer
+                )
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "已保存，正在等服务器提取附件文本…",
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    Text(
+                        text = "${state.attachmentCount} 个附件。离开本页会停止等待，" +
+                            "回到列表后仍可看到状态（也可在详情里手动刷新）。",
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        style = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                    TextButton(onClick = {
+                        viewModel.skipTracking()
+                    }) { Text("立即返回") }
+                }
+            }
+        }
+
         // Non-fatal notice (e.g. one of several files was refused)
         notice?.let { message ->
             Card(
@@ -206,7 +257,7 @@ fun AddMemoryScreen(
         Button(
             onClick = viewModel::submitMemory,
             modifier = Modifier.fillMaxWidth(),
-            enabled = !busy && (content.isNotBlank() || attachments.isNotEmpty())
+            enabled = !busy && tracking == null && (content.isNotBlank() || attachments.isNotEmpty())
         ) {
             if (isLoading) {
                 CircularProgressIndicator(
@@ -224,7 +275,7 @@ fun AddMemoryScreen(
         OutlinedButton(
             onClick = onNavigateBack,
             modifier = Modifier.fillMaxWidth(),
-            enabled = !isLoading
+            enabled = !isLoading || tracking != null
         ) {
             Text("Cancel")
         }

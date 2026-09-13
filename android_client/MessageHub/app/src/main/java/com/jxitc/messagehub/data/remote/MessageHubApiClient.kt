@@ -3,8 +3,10 @@ package com.jxitc.messagehub.data.remote
 import com.jxitc.messagehub.data.local.AppPreferences
 import com.jxitc.messagehub.domain.model.AttachmentLimits
 import com.jxitc.messagehub.domain.model.AttachmentPayload
+import com.jxitc.messagehub.domain.model.ExtractionStatus
 import com.jxitc.messagehub.domain.model.Memory
 import com.jxitc.messagehub.domain.model.MemoryCreationRequest
+import com.jxitc.messagehub.domain.model.MessageAttachmentDetail
 import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.Dispatchers
@@ -46,11 +48,17 @@ class MessageHubApiClient(
         // 表面上还不报错。这里直接让 3xx 成为失败，并在下面给出可读的错误。
         .followRedirects(false)
         .addInterceptor(loggingInterceptor)
-        // Attach the shared API key to every request to MH /api/v1/* (header).
+        // Attach the shared API key to every request to the configured MH server
+        // (header). 只对**配置的那台主机**加：key 是凭据，不该出现在任何第三方请求里
+        // —— 例如服务端 metadata 里那个独立 blob 源的 URL（客户端本来也不请求它）。
         .addInterceptor { chain ->
             val original = chain.request()
             val key = preferences.apiKey
-            val request = if (key.isNotBlank()) {
+            val sameHost = AttachmentUrls.shouldAttachApiKey(
+                requestUrl = original.url.toString(),
+                serverUrl = preferences.effectiveServerUrl
+            )
+            val request = if (key.isNotBlank() && sameHost) {
                 original.newBuilder().header("X-API-Key", key).build()
             } else original
             chain.proceed(request)
@@ -59,6 +67,14 @@ class MessageHubApiClient(
         .readTimeout(30, TimeUnit.SECONDS)
         .writeTimeout(30, TimeUnit.SECONDS)
         .build()
+
+    /**
+     * 给图片加载库（Coil）用的同一个客户端。
+     *
+     * 必须共用：缩略图是从 `{serverUrl}/api/v1/blobs/<key>` 拉的，需要 `X-API-Key`，
+     * 而鉴权只在上面这个拦截器里。Coil 那边再配一层磁盘缓存，图片就不会反复下载。
+     */
+    val httpClient: OkHttpClient get() = okHttpClient
     
     private fun createApiService(): MessageHubApiService {
         val retrofit = Retrofit.Builder()
@@ -94,7 +110,8 @@ class MessageHubApiClient(
                             content = request.content,
                             sourceType = request.sourceType,
                             metadata = request.metadata,
-                            isUploaded = true
+                            isUploaded = true,
+                            serverMessageId = serverId?.takeIf { it.isNotBlank() }
                         )
                     )
                 } else {
@@ -151,6 +168,14 @@ class MessageHubApiClient(
                     val responseBody = response.body()
                     val serverId = responseBody?.id ?: responseBody?.data?.id
                     Logger.i("Message with attachments created on MH server (HTTP ${response.code()}): id=$serverId")
+                    // 上传响应里已经带了每个附件的初始状态（`extraction.status = pending`），
+                    // 先落一份，用户回到列表就能看到附件条目，不用等第一次轮询回来。
+                    val initialAttachments = responseBody?.attachments.orEmpty().mapNotNull { it.toDomain() }
+                    val rejected = responseBody?.rejected.orEmpty().map { it.toDomain() }
+                    if (rejected.isNotEmpty()) {
+                        Logger.w("MH rejected ${rejected.size} attachment(s): " +
+                            rejected.joinToString { "${it.name}(${it.reason})" })
+                    }
                     ProcessingResult.Success(
                         Memory(
                             title = request.content.take(50).ifBlank {
@@ -159,7 +184,10 @@ class MessageHubApiClient(
                             content = request.content,
                             sourceType = request.sourceType,
                             metadata = request.metadata,
-                            isUploaded = true
+                            isUploaded = true,
+                            serverMessageId = serverId?.takeIf { it.isNotBlank() },
+                            attachments = initialAttachments,
+                            skippedAttachments = rejected
                         )
                     )
                 } else {
@@ -210,6 +238,50 @@ class MessageHubApiClient(
         }
     }
 
+
+    /**
+     * `GET /api/v1/messages/<id>`：单条消息 + 附件列表 + 提取状态。
+     *
+     * 附件在这个接口里位于 `metadata.attachments`；提取出的文本**两处都要看**
+     * （`applied_to_content == true` → 文本在 content 里；否则看 `extraction.text`），
+     * 判定集中在 [com.jxitc.messagehub.domain.service.AttachmentPreviewRules]。
+     */
+    suspend fun fetchMessageDetail(serverMessageId: String): ProcessingResult<MessageAttachmentDetail> {
+        if (serverMessageId.isBlank()) {
+            return ProcessingResult.Error("消息没有服务器 id，无法查询附件状态")
+        }
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = createApiService().getMessage(serverMessageId)
+                val body = response.body()
+                if (response.isSuccessful && body != null) {
+                    val detail = body.toDomain()
+                    Logger.d(
+                        "Message $serverMessageId: ${detail.attachments.size} attachment(s), " +
+                            "pending=${detail.attachments.count { !(it.extraction?.status ?: ExtractionStatus.UNKNOWN).isTerminal }}"
+                    )
+                    ProcessingResult.Success(detail)
+                } else {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
+                    Logger.w("Attachment status query failed for $serverMessageId: $errorMsg")
+                    ProcessingResult.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                Logger.w("Attachment status query failed for $serverMessageId: ${e.message}")
+                ProcessingResult.Error("Connection failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 附件原件的**稳定下载地址**：只用 `key` + 配置的 serverUrl 拼，不用接口返回的 `url`
+     * （那个指向独立 blob 源，带不了 `X-API-Key`）—— 规则见 [AttachmentUrls]。
+     */
+    fun blobUrlFor(key: String): String = AttachmentUrls.blobUrl(preferences.effectiveServerUrl, key)
 
     /** Pulls messages from MH (page/per_page are MH's pagination params). */
     suspend fun getMemories(limit: Int = 50, offset: Int = 0): ProcessingResult<List<Memory>> {

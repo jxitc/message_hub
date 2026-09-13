@@ -23,6 +23,8 @@ viewModelCompose = "2.9.2"
 gson = "2.11.0"
 mockito = "5.14.2"
 ksp = "2.0.21-1.0.28"
+# 附件缩略图（图片加载 + 磁盘缓存）
+coil = "2.7.0"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -71,6 +73,9 @@ mlkit-text-recognition = { group = "com.google.mlkit", name = "text-recognition"
 
 # JSON parsing
 gson = { group = "com.google.code.gson", name = "gson", version.ref = "gson" }
+
+# 图片加载（附件缩略图）
+coil-compose = { group = "io.coil-kt", name = "coil-compose", version.ref = "coil" }
 
 # Testing
 mockito-core = { group = "org.mockito", name = "mockito-core", version.ref = "mockito" }

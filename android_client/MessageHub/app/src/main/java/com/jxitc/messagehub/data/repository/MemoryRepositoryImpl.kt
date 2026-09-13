@@ -1,15 +1,18 @@
 package com.jxitc.messagehub.data.repository
 
+import com.jxitc.messagehub.data.database.AttachmentMetadataCodec
 import com.jxitc.messagehub.data.database.MemoryDao
 import com.jxitc.messagehub.data.database.toDomainModel
 import com.jxitc.messagehub.data.database.toEntity
 import com.jxitc.messagehub.domain.model.Memory
 import com.jxitc.messagehub.domain.model.MemoryCreationRequest
+import com.jxitc.messagehub.domain.model.MessageAttachmentDetail
 import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class MemoryRepositoryImpl(
     private val memoryDao: MemoryDao
@@ -116,6 +119,58 @@ class MemoryRepositoryImpl(
     override suspend fun searchMemories(query: String): Flow<List<Memory>> {
         return memoryDao.searchMemories(query).map { entities ->
             entities.map { it.toDomainModel() }
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // 附件与提取状态（元信息 + 文本进库，字节不进）
+    // ------------------------------------------------------------------
+
+    override suspend fun attachServerMessageId(localId: Long, serverMessageId: String): ProcessingResult<Unit> {
+        return try {
+            memoryDao.updateServerMessageId(localId, serverMessageId)
+            ProcessingResult.Success(Unit)
+        } catch (e: Exception) {
+            android.util.Log.e("MemoryRepo", "Failed to store server message id for $localId", e)
+            ProcessingResult.Error("Failed to store server message id", e)
+        }
+    }
+
+    /**
+     * 把 `GET /api/v1/messages/<id>` 的结果写回本地。
+     *
+     * content 也一起更新：提取文本有可能被服务端写进了正文（`applied_to_content`），
+     * 而本地这份正文是列表与详情的数据源 —— 不更新的话，用户看到的还是"【附件】xxx"占位。
+     */
+    override suspend fun saveAttachmentDetail(detail: MessageAttachmentDetail): ProcessingResult<Int> {
+        return try {
+            val existing = memoryDao.getMemoryByServerId(detail.serverMessageId)
+                ?: return ProcessingResult.Success(0)
+            val now = LocalDateTime.now()
+            val content = if (detail.content.isNotBlank()) detail.content else existing.content
+            val updated = memoryDao.updateAttachmentStatus(
+                serverMessageId = detail.serverMessageId,
+                attachmentsJson = AttachmentMetadataCodec.encodeAttachments(detail.attachments),
+                skippedJson = AttachmentMetadataCodec.encodeSkipped(detail.skipped),
+                syncedAt = now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME),
+                content = content,
+                updatedAt = now.format(DateTimeFormatter.ISO_LOCAL_DATE_TIME)
+            )
+            ProcessingResult.Success(updated)
+        } catch (e: Exception) {
+            android.util.Log.e("MemoryRepo", "Failed to save attachment status", e)
+            ProcessingResult.Error("Failed to save attachment status", e)
+        }
+    }
+
+    override suspend fun getMemoriesAwaitingAttachments(): List<Memory> {
+        return try {
+            memoryDao.getMemoriesWithServerAttachments()
+                .map { it.toDomainModel() }
+                .filter { it.hasPendingExtraction && !it.serverMessageId.isNullOrBlank() }
+        } catch (e: Exception) {
+            android.util.Log.e("MemoryRepo", "Failed to load memories awaiting attachments", e)
+            emptyList()
         }
     }
     
