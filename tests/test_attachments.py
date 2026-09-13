@@ -499,3 +499,24 @@ def test_extraction_text_is_not_duplicated_when_it_fills_content():
     state = message.message_metadata['attachments'][0]['extraction']
     assert message.content == '识别结果'
     assert 'text' not in state                            # exactly one copy
+
+
+def test_blob_url_switches_to_the_separate_origin(app, client, auth_headers, store):
+    """With a blob host configured, browser-facing URLs must leave the web origin.
+
+    Serving user-uploaded files from the same origin as the web UI is the risk the
+    separate origin exists to remove, so the switch has to be visible in the API.
+    """
+    app.config['BLOB_PUBLIC_BASE'] = 'https://mhblob.example.com'
+    r = upload(client, auth_headers, [('shot.png', PNG_1PX, 'image/png')], content='x')
+    attachment = r.get_json()['attachments'][0]
+
+    assert attachment['url'] == 'https://mhblob.example.com/%s' % attachment['key']
+    # The API-key path still works against that host (same auth, different origin).
+    assert client.get(attachment['url'], headers=auth_headers).status_code == 404  # key not in this store view
+
+
+def test_blob_url_stays_relative_without_a_blob_host(client, auth_headers, store):
+    r = upload(client, auth_headers, [('shot.png', PNG_1PX, 'image/png')], content='x')
+    attachment = r.get_json()['attachments'][0]
+    assert attachment['url'] == '/api/v1/blobs/%s' % attachment['key']

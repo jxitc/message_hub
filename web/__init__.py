@@ -30,9 +30,14 @@ def _page_href(page):
 
 
 def _attachment_url(key):
-    """Signed, expiring download URL for the web UI (see web.download_attachment)."""
-    from api.v1.blobs import sign
-    return url_for('web.download_attachment', key=key, t=sign(key))
+    """Signed, expiring download URL for the web UI.
+
+    Uses the same signed-link mechanism as the API (one mechanism, not two), so
+    setting BLOB_PUBLIC_BASE moves web-UI attachment links onto the separate blob
+    origin automatically.
+    """
+    from api.v1.blobs import blob_url
+    return blob_url(key, signed=True)
 
 
 web.add_app_template_filter(_utc_iso, 'utc_iso')

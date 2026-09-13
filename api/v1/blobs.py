@@ -76,10 +76,17 @@ def verify(key, token):
 
 
 def blob_url(key, signed=False):
-    """Relative URL for a blob. `signed=True` adds a token for header-less clients."""
-    url = '/api/v1/blobs/%s' % key
+    """URL for a blob. `signed=True` adds a token for header-less clients.
+
+    With BLOB_PUBLIC_BASE configured the URL points at the separate blob origin
+    (nginx maps `<base>/<key>` to `/api/v1/blobs/<key>`), which is what a browser
+    should use. Without it the URL stays relative on the current origin, so a
+    deployment that has not set up a blob host keeps working unchanged.
+    """
+    base = (current_app.config.get('BLOB_PUBLIC_BASE') or '').rstrip('/')
+    url = ('%s/%s' % (base, key)) if base else ('/api/v1/blobs/%s' % key)
     if signed:
-        return '%s?token=%s' % (url, sign(key))
+        url = '%s?token=%s' % (url, sign(key))
     return url
 
 

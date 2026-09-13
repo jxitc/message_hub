@@ -143,15 +143,31 @@ removed = store.collect_garbage(referenced_keys, dry_run=False)
 
 - 非图片一律 `Content-Disposition: attachment`，配合 `X-Content-Type-Options: nosniff`；
   图片才 `inline`（App 要显示截图）。
-- ⚠️ **尚未做**：独立子域（`blob.mh.jxitc.com`）。目前附件与 Web UI 同源
-  （`mh.jxitc.com/api/v1/blobs/…`）。上面两条头部是当前的同源防护；
-  独立域是更强的隔离（用户上传的 PDF/SVG 就算被诱导打开也不在主站源上），列为下一步。
+- **独立源已启用**：附件从 **`https://mhblob.jxitc.com/<key>`** 提供，与 Web UI
+  （`mh.jxitc.com`）不同源。API 返回的 `url` 会带上这个绝对地址（由 `BLOB_PUBLIC_BASE`
+  控制；不配置则退回同源相对路径 `/api/v1/blobs/<key>`，功能不变）。
+  nginx 把 `/<key>` 映射到 `/api/v1/blobs/<key>`，鉴权仍由应用负责。
+
+  ⚠️ **主机名必须是一级子域**——这是踩过的坑：**Cloudflare 免费版 Universal SSL 只覆盖
+  apex 与一级子域**（`jxitc.com`、`*.jxitc.com`）。最初用的 `blob.mh.jxitc.com` 是**二级**
+  子域，CF 边缘没有对应证书，TLS 直接在握手阶段失败（`sslv3 alert handshake failure`），
+  绕过它需要付费的 Advanced Certificate Manager。实测对比：
+
+  ```
+  mh.jxitc.com      → subject: CN=jxitc.com，verify ok      ← Universal SSL 覆盖
+  blob.mh.jxitc.com → handshake failure                     ← 二级，无证书
+  mhblob.jxitc.com  → subject: CN=jxitc.com，verify ok      ← 一级，覆盖
+  ```
+
+  签发源站证书时还有个连带问题：**CF 开着代理会干扰 ACME HTTP-01 校验**
+  （边缘可能先 301 到 https，而这时源站还没有该域名的证书，校验必然失败）。
+  做法是**临时把该 DNS 记录切为 DNS-only（灰云）→ 跑 certbot → 再切回代理**。
 - 密钥、签名 token 都不入库；token 用 `SECRET_KEY` 做 HMAC，自带过期。
 
 ## 验证记录（2026-09-13）
 
-- 单测 86 例（`tests/test_attachments.py` 覆盖嗅探/白名单/去重/GC/上传校验/下载鉴权/
-  签名与过期/提取文本落位），全过。
+- 单测 88 例（`tests/test_attachments.py` 覆盖嗅探/白名单/去重/GC/上传校验/下载鉴权/
+  签名与过期/提取文本落位/独立源 URL 切换），全过。
 - 线上端到端（真实文件）：
   - 42KB PNG → `tesseract` OCR → `content` = `MH OCR TEST 12345\nsecond line here`；
   - 13KB PDF → `pdftotext` → 同样文本；

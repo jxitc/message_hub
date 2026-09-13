@@ -136,6 +136,34 @@ systemctl restart ${APP_NAME}
 # firewall
 if command -v ufw >/dev/null 2>&1; then
   echo "==> firewall (ufw)"
+  # 附件独立源：把用户上传的文件放到与 Web UI 不同的源上提供（PDF/SVG 即使被诱导
+  # 执行，也够不到主站的会话）。路径 /<key> -> /api/v1/blobs/<key>，鉴权仍由应用负责。
+  #
+  # 只在文件不存在时创建：之后 TLS 行是 certbot 追加的，每次部署都重写会把证书配置冲掉。
+  #
+  # ⚠️ 主机名必须是**一级**子域：Cloudflare 免费版 Universal SSL 只覆盖 apex 与一级
+  # 子域，二级（如 blob.mh.jxitc.com）在边缘没有证书，握手会直接失败。
+  if [ ! -f /etc/nginx/sites-available/mhblob.jxitc.com.conf ]; then
+    cat > /etc/nginx/sites-available/mhblob.jxitc.com.conf <<'NGINX'
+server {
+    server_name mhblob.jxitc.com;
+    client_max_body_size 1m;          # downloads only
+    location / {
+        proxy_pass http://127.0.0.1:5001/api/v1/blobs/;
+        # 注意：\$ 在这里必须转义。本文件是「未加引号的外层 heredoc」，不转义会在本地
+        # 就展开 nginx 变量，远端 set -u 会直接报 unbound variable 而中断部署。
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+    listen 80;
+}
+NGINX
+    ln -sf /etc/nginx/sites-available/mhblob.jxitc.com.conf /etc/nginx/sites-enabled/
+    echo "  created mhblob.jxitc.com vhost (run: certbot --nginx -d mhblob.jxitc.com)"
+  fi
+
   # 附件上传：nginx 默认 client_max_body_size 是 1MB，而单个附件上限正好是 1MB，
   # 加上 multipart 开销就会 413。给 API 单独放宽。
   cat > /etc/nginx/conf.d/mh-upload.conf <<'NGINX'

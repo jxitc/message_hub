@@ -331,4 +331,29 @@ Time:...`），显示层又要剥一遍，冗余不正式。
 - **未做（已记录）**：独立 blob 子域 `blob.mh.jxitc.com`（当前与 Web UI 同源，靠
   Content-Disposition + nosniff 防护）；真机验证（未连 USB）。
 - 新文档：`docs/attachments.md`（含"为什么字节不进 DB"、迁移到 R2 的步骤、安全说明）。
+## 2026-09-13（追加：附件独立源 mhblob.jxitc.com）
+
+- **完成 Phase 1 最后一块**：附件不再与 Web UI 同源，改由 **`https://mhblob.jxitc.com/<key>`**
+  提供（nginx 把 `/<key>` 映射到 `/api/v1/blobs/<key>`，鉴权仍由应用负责：X-API-Key 或 HMAC 签名 token）。
+  这样用户上传的 PDF/SVG 即使被诱导打开，也够不到主站的会话。
+- **代码**：新增 `BLOB_PUBLIC_BASE`（`config.py`）；`blob_url()` 在有该配置时返回独立源绝对地址，
+  否则退回同源相对路径（不配置也能照常工作，等于回滚开关）。网页端与 API 统一走**同一个签名机制**
+  （删掉了原来的 `web.download_attachment` 路由，避免两套签名并存）。
+  新增 `test_blob_url_switches_to_the_separate_origin`（88 例全过）。
+- **⚠️ 踩坑并记录**：最初用 `blob.mh.jxitc.com`（**二级**子域），CF 边缘握手直接失败
+  （`sslv3 alert handshake failure`，无 HTTP 状态码）。根因：**免费版 Universal SSL 只覆盖 apex 与
+  一级子域**；二级子域需要付费的 Advanced Certificate Manager。实测对比：
+  `mh.jxitc.com` → `CN=jxitc.com` verify ok；`blob.mh.jxitc.com` → 握手失败；
+  `mhblob.jxitc.com` → verify ok。改用一级子域解决。
+- **签发源站证书**：CF 代理会干扰 ACME HTTP-01（边缘可能先 301 到 https 而源站尚无该域名证书），
+  做法是**临时把记录切为 DNS-only → 跑 certbot → 再切回橙云**；旧名字的证书已清理。
+- **deploy.sh**：blob vhost 纳入管理，但用「文件不存在才创建」——certbot 追加的 TLS 行不能被
+  每次部署冲掉（已验证重部署后 2 行 ssl_certificate 仍在）。
+  另修一个部署脚本 bug：新加的 nginx 配置里 `$host` 等未转义，被未加引号的外层 heredoc 在本地展开，
+  远端 `set -u` 直接 `unbound variable` **导致整次部署中断**（当时只 rsync 了代码、服务没重启）。
+- **线上验证**：API 返回 `https://mhblob.jxitc.com/<key>`；网页版附件链接同样指向该源并带签名；
+  从该源用 token 下载字节与原件 `cmp` 一致；无 token 401；OCR 仍正常（tesseract 34 字进 content）；
+  自测数据已清理、孤儿 blob 已 GC。
+- **技能沉淀**：`cloudflare-publish` 新增 §2.1「子域层级决定证书覆盖」+ 排障表两行
+  （commit `c476965`）——这个坑跨项目通用。
 

@@ -20,6 +20,12 @@ class Config:
     # If unset the API runs WITHOUT auth (dev/test only) and logs a warning.
     API_KEY = os.environ.get('MH_API_KEY')
     
+    # Public base for attachment URLs. Unset -> /api/v1/blobs/<key> on the same
+    # origin. Set (e.g. https://mhblob.jxitc.com) -> attachments are served from a
+    # separate origin, so user-uploaded files never share an origin with the web
+    # UI (a PDF/SVG that executes cannot reach the session on the main host).
+    BLOB_PUBLIC_BASE = os.environ.get('BLOB_PUBLIC_BASE')
+
     # Message settings
     MAX_MESSAGE_LENGTH = int(os.environ.get('MAX_MESSAGE_LENGTH') or 10000)
     MAX_METADATA_SIZE = int(os.environ.get('MAX_METADATA_SIZE') or 5000)
