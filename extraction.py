@@ -336,8 +336,12 @@ def process_message(session, store, message, force_ocr=False):
                                           'error': '附件缺少 key'})
             processed += 1
             continue
+        # A per-attachment request (set from the attachment page) also forces OCR —
+        # otherwise the button would be a no-op for exactly the case it exists for.
+        wants_ocr = force_ocr or bool(
+            (attachment.get('extraction') or {}).get('requested_ocr'))
         result = extract(store, key, attachment.get('mime') or '',
-                         attachment.get('kind') or 'file', force_ocr=force_ocr)
+                         attachment.get('kind') or 'file', force_ocr=wants_ocr)
         apply_result(message, index, result)
         session.commit()
         processed += 1

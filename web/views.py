@@ -8,6 +8,8 @@ import json
 import os
 import threading
 import time
+import copy
+
 import message_filters as _mf
 from blob_store import BlobStore as _BlobStore
 
@@ -326,6 +328,102 @@ def delete_messages_filtered():
         flash(f'Delete failed: {str(e)}', 'error')
 
     return _messages_redirect()
+
+def _attachment_context(message_id, index):
+    """Fetch (message, attachment, previous/next) for the attachment detail view.
+
+    Attachments are addressed by (message, index) rather than by blob hash: the
+    bytes may be shared between messages, but *this* extraction, *this* origin and
+    *this* place in the timeline are per-attachment facts.
+    """
+    message = db.session.query(Message).filter(Message.id == message_id).first()
+    if message is None:
+        return None, None, None, None, '找不到这条消息'
+    attachments = (message.message_metadata or {}).get('attachments') or []
+    if not attachments:
+        return message, None, None, None, '这条消息没有附件'
+    if index < 0 or index >= len(attachments):
+        return message, None, None, None, '附件序号超出范围（共 %d 个）' % len(attachments)
+    previous = index - 1 if index > 0 else None
+    following = index + 1 if index + 1 < len(attachments) else None
+    return message, attachments[index], previous, following, None
+
+
+@web.route('/messages/<message_id>/attachments/<int:index>')
+def attachment_detail(message_id, index):
+    """Everything known about one attachment: the original, and what we did to it.
+
+    Deliberately built around the attachment *record* (kind / mime / extraction)
+    rather than around images: a preview block switches on `kind`, everything else —
+    size, hash, provenance, extraction state, extracted text — is generic, so a new
+    file type needs a preview branch rather than a new page.
+    """
+    message, attachment, previous, following, error = _attachment_context(message_id, index)
+    if error:
+        flash(error, 'error')
+        if message is not None:
+            return redirect(url_for('web.message_detail', message_id=message.id))
+        return redirect(url_for('web.messages'))
+
+    from api.v1.blobs import blob_url
+    preview_url = blob_url(attachment['key'], signed=True) if attachment.get('key') else None
+
+    extraction = attachment.get('extraction') or {}
+    # The extracted text lives in exactly one place (see extraction.apply_result):
+    # in `content` when it filled it, otherwise in the attachment record. Show
+    # whichever one actually holds it, and label it so the difference is obvious.
+    extracted_text = extraction.get('text')
+    text_source = 'attachment'
+    if not extracted_text and extraction.get('applied_to_content'):
+        extracted_text = message.content
+        text_source = 'content'
+
+    return render_template('attachment_detail.html',
+                           message=message,
+                           attachment=attachment,
+                           extraction=extraction,
+                           extracted_text=extracted_text,
+                           text_source=text_source,
+                           index=index,
+                           total=len((message.message_metadata or {}).get('attachments') or []),
+                           previous=previous,
+                           following=following,
+                           preview_url=preview_url)
+
+
+@web.route('/messages/<message_id>/attachments/<int:index>/reextract', methods=['POST'])
+def attachment_reextract(message_id, index):
+    """Queue one attachment for (re-)extraction, optionally forcing OCR.
+
+    Only marks it pending: the background worker does the work. Doing it inline
+    would risk a request that outlives gunicorn's timeout on a scanned document,
+    and the queue is already durable.
+    """
+    message, attachment, _prev, _next, error = _attachment_context(message_id, index)
+    if error:
+        flash(error, 'error')
+        return redirect(url_for('web.messages'))
+
+    force_ocr = request.form.get('force_ocr') == 'yes'
+    metadata = copy.deepcopy(message.message_metadata or {})
+    attachments = list(metadata.get('attachments') or [])
+    state = dict(attachments[index].get('extraction') or {})
+    # Deep copy matters: with a shallow one the previous value shares inner dicts,
+    # SQLAlchemy compares them as equal and skips the UPDATE entirely.
+    state.pop('text', None)
+    state['status'] = 'pending'
+    state['requested_ocr'] = force_ocr
+    if force_ocr:
+        state['note'] = '已请求强制 OCR'
+    attachments[index]['extraction'] = state
+    metadata['attachments'] = attachments
+    message.message_metadata = metadata
+    db.session.commit()
+
+    flash('已排入提取队列（后台约 30 秒内处理）%s，稍后刷新本页查看。'
+          % ('，将强制走 OCR' if force_ocr else ''), 'success')
+    return redirect(url_for('web.attachment_detail', message_id=message_id, index=index))
+
 
 @web.route('/messages/<message_id>')
 def message_detail(message_id):

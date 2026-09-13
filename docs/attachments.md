@@ -175,6 +175,55 @@ removed = store.collect_garbage(referenced_keys, dry_run=False)
   做法是**临时把该 DNS 记录切为 DNS-only（灰云）→ 跑 certbot → 再切回代理**。
 - 密钥、签名 token 都不入库；token 用 `SECRET_KEY` 做 HMAC，自带过期。
 
+## 附件详情页
+
+`/messages/<id>/attachments/<index>`：一个**附件的视图**，不是"图片的页面"。
+
+页面结构刻意分成两半，这样加文件类型不需要新页面：
+
+| 部分 | 是否通用 | 说明 |
+|---|---|---|
+| 预览块 | **按 kind 分支** | 图片 `<img>`；文本 `<pre>`；音频 `<audio>`；PDF 与未知类型给下载按钮 |
+| 处理信息 | 通用 | 状态徽标、引擎、提取字符（含页数与字/页）、文本落位、错误与提示 |
+| 操作 | 通用 | 下载原件（签名）、**重新提取**、**强制 OCR 重跑**（后台排队，不阻塞请求） |
+| 原件信息 | 通用 | 大小（人类可读）、mime、kind、来源与 origin、sha256 |
+
+两个刻意的决定：
+
+- **PDF 不做内嵌预览**。我们给非图片一律下发 `Content-Disposition: attachment`
+  （同源 XSS 防护的一环），内嵌反而会触发下载；而 PDF 的有用部分本来就是抽取出来的文字，
+  已经摆在右侧。想要内嵌预览可以加，但要想清楚这道防护怎么保留。
+- **"有附件但没存下来"也会显示**。邮件里被超限/类型拒掉的文件在消息详情页单列一节，
+  带原因——"有附件没存"和"没附件"必须能分辨。
+
+另外顺手修了一个让 metadata 没法读的问题：Flask 的 JSON 默认 `ensure_ascii=True`，
+中文全变成 `\uXXXX`（网页版的 metadata 面板和 **API 响应**都受影响）。
+`app.py` 里 `app.json.ensure_ascii = False` 一行解决，输出真正的 UTF-8。
+
+## 手机端：走现有接口就够，不用加接口
+
+上传 → 轮询 → 下拉，用现有契约即可：
+
+```
+1) POST /api/v1/messages (multipart)   → 拿到 id 和 attachments[].key
+2) GET  /api/v1/messages/<id>          → 读 metadata.attachments[].extraction.status
+                                          pending → done | failed | empty
+3) GET  {serverUrl}/api/v1/blobs/<key>  ← 带 X-API-Key，拉原件
+```
+
+⚠️ **两个必须避开的坑**（客户端实现时最容易在这里出问题）：
+
+1. **别用 API 返回的 `url` 字段去下载**。那个字段现在指向独立源 `mhblob.jxitc.com`
+   （浏览器需要它，因为 `<img>` 带不了 header）。App 的 OkHttp 鉴权拦截器通常只对 API 域名加
+   `X-API-Key`，跨主机请求会直接 401。**用 `key` + 自己的 serverUrl**：
+   这也正是当初把下载设计成"稳定入口"的目的——`BLOB_PUBLIC_BASE` 怎么改都不影响已发布的 APK。
+2. **提取文本可能在两个地方之一**：`content`（填进了正文）或
+   `metadata.attachments[i].extraction.text`（正文本来就有内容时）。两处都要看，否则会出现
+   "手机上 OCR 文字不见了"。
+
+本地缓存建议：**附件字节不必进 Room**（按需拉取 + 图片库自带磁盘缓存即可），
+但**提取文本值得同步进 Room**——离线也能看，详情页还能立刻显示。
+
 ## 验收脚本（验证**已部署**的系统）
 
 单元测试跑的是内存里的 Flask 客户端，验不了 nginx 的体积上限、Cloudflare 的证书与代理、

@@ -25,6 +25,10 @@ def create_app():
     app.register_blueprint(api_v1)
     app.register_blueprint(web)
     
+    # JSON 默认 ensure_ascii=True，中文会变成 \uXXXX —— 网页版看 metadata 就是乱码，
+    # API 响应也一样。设为 False 后输出真正的 UTF-8（体积也更小）。
+    app.json.ensure_ascii = False
+
     # Setup logging
     setup_logging(app)
     

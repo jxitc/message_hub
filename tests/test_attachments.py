@@ -558,3 +558,120 @@ def test_empty_pdf_text_is_not_usable():
 def test_count_pages_uses_form_feeds():
     assert extraction.count_pages('one page') == 1
     assert extraction.count_pages('p1\fp2\fp3') == 3
+
+
+# ---------------------------------------------------------------------------
+# Attachment detail page (a view over the attachment record)
+# ---------------------------------------------------------------------------
+
+def upload_then_index(client, auth_headers, store, name='shot.png', payload=None,
+                      content=''):
+    import io
+    r = client.post('/api/v1/messages', data={
+        'source_device_id': 'd', 'type': 'NOTE', 'sender': 'OPPO PHZ110',
+        'content': content, 'timestamp': '2026-09-13T10:00:00Z',
+        'metadata': '{}',
+        'attachments': (io.BytesIO(payload or PNG_1PX), name),
+    }, headers=auth_headers, content_type='multipart/form-data')
+    assert r.status_code == 201, r.get_json()
+    return r.get_json()['id']
+
+
+def test_detail_page_shows_original_and_processing_info(app, client, auth_headers, store):
+    message_id = upload_then_index(client, auth_headers, store, content='')
+    with app.app_context():
+        from models import db, Message
+        message = db.session.get(Message, message_id)
+        extraction.apply_result(message, 0, {
+            'status': 'done', 'engine': 'tesseract', 'text': '识别出来的中文'})
+        db.session.commit()
+
+    page = client.get('/messages/%s/attachments/0' % message_id)
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert 'shot.png' in body                       # the original, named
+    assert '原件预览' in body and '处理信息' in body
+    assert 'tesseract' in body                      # which engine ran
+    assert '识别出来的中文' in body                   # the extracted text, readable
+    assert 'sha256' in body
+    # Human-readable size, not raw bytes only
+    assert '70 B' in body or 'B<' in body or 'B ' in body
+
+
+def test_detail_page_explains_where_the_text_went(app, client, auth_headers, store):
+    """With a body already present the extracted text stays in the record; the page
+    must say so rather than imply the message text is the OCR result."""
+    message_id = upload_then_index(client, auth_headers, store, content='邮件正文在此')
+    with app.app_context():
+        from models import db, Message
+        message = db.session.get(Message, message_id)
+        extraction.apply_result(message, 0, {'status': 'done', 'engine': 'pdftotext',
+                                             'text': 'PDF 抽出来的字'})
+        db.session.commit()
+
+    body = client.get('/messages/%s/attachments/0' % message_id).get_data(as_text=True)
+    assert 'PDF 抽出来的字' in body
+    assert '没覆盖' in body or '保留在附件记录' in body
+
+
+def test_detail_page_rejects_a_bad_index(app, client, auth_headers, store):
+    message_id = upload_then_index(client, auth_headers, store)
+    assert client.get('/messages/%s/attachments/9' % message_id).status_code == 302
+
+
+def test_reextract_marks_pending_and_survives_a_fresh_query(app, client, auth_headers, store):
+    """The button must actually queue work — a shallow metadata edit would produce a
+    redirect and a success flash while changing nothing."""
+    message_id = upload_then_index(client, auth_headers, store)
+    with app.app_context():
+        from models import db, Message
+        message = db.session.get(Message, message_id)
+        extraction.apply_result(message, 0, {'status': 'done', 'engine': 'tesseract',
+                                             'text': '旧结果'})
+        db.session.commit()
+
+    r = client.post('/messages/%s/attachments/0/reextract' % message_id,
+                    data={'force_ocr': 'yes'}, follow_redirects=True)
+    assert r.status_code == 200
+
+    with app.app_context():
+        from models import db, Message
+        db.session.expunge_all()
+        state = db.session.get(Message, message_id).message_metadata['attachments'][0]['extraction']
+    assert state['status'] == 'pending'
+    assert state['requested_ocr'] is True
+    assert 'text' not in state          # stale text must not linger
+
+
+def test_requested_ocr_forces_the_ocr_path(monkeypatch, store):
+    """A per-attachment request has to reach the extractor, or the button is a no-op
+    for exactly the scanned-PDF case it exists for."""
+    seen = {}
+
+    def fake_extract(store_, key, mime, kind, force_ocr=False):
+        seen['force_ocr'] = force_ocr
+        return {'status': 'done', 'text': 'x'}
+
+    monkeypatch.setattr(extraction, 'extract', fake_extract)
+
+    class FakeSession:
+        def commit(self):
+            pass
+
+    message = Message(id='m-req', source_device_id='d', type='DOCUMENT', sender='me',
+                      content='', message_metadata={'attachments': [
+                          {'key': 'aa/bb/' + 'c' * 64 + '.pdf', 'kind': 'pdf',
+                           'mime': 'application/pdf',
+                           'extraction': {'status': 'pending', 'requested_ocr': True}}]})
+    extraction.process_message(FakeSession(), store, message)
+    assert seen['force_ocr'] is True
+
+
+def test_json_is_not_ascii_escaped(app):
+    """Regression: Flask's default escaped Chinese into \\uXXXX, which made the
+    metadata panel (and every API response) unreadable."""
+    with app.app_context():
+        from flask import jsonify
+        payload = jsonify({'content': '中文测试'}).get_data(as_text=True)
+    assert '中文测试' in payload
+    assert '\\u4e2d' not in payload

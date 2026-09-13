@@ -40,6 +40,19 @@ def _attachment_url(key):
     return blob_url(key, signed=True)
 
 
+def _human_size(value):
+    """Byte count a human can read (attachments are 1MB-capped, but PDFs vary)."""
+    try:
+        size = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    for unit in ('B', 'KB', 'MB', 'GB'):
+        if size < 1024 or unit == 'GB':
+            return ('%d %s' % (size, unit)) if unit == 'B' else ('%.1f %s' % (size, unit))
+        size /= 1024
+
+
+web.add_app_template_filter(_human_size, 'human_size')
 web.add_app_template_filter(_utc_iso, 'utc_iso')
 web.add_app_template_global(_attachment_url, 'attachment_url')
 web.add_app_template_global(_page_href, 'page_href')

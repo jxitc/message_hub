@@ -227,14 +227,14 @@
                                         {% if atts %}
                                         <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
                                             {% for att in atts %}
-                                            <a href="{{ attachment_url(att.key) }}"
+                                            <a href="{{ url_for('web.attachment_detail', message_id=message.id, index=loop.index0) }}"
                                                class="btn btn-sm btn-outline-info"
-                                               title="{{ att.name }} · {{ (att.size / 1024)|round(1) }} KB">
+                                               title="{{ att.name }} · {{ att.size|human_size }} —— 打开详情（原件 + OCR 结果）">
                                                 {% if att.kind == 'image' %}<i class="bi bi-image"></i>
                                                 {% elif att.kind == 'pdf' %}<i class="bi bi-file-earmark-pdf"></i>
                                                 {% else %}<i class="bi bi-file-earmark"></i>{% endif %}
                                                 {{ att.name|truncate(24) }}
-                                                <span class="text-muted ms-1">{{ (att.size / 1024)|round(0)|int }}K</span>
+                                                <span class="text-muted ms-1">{{ att.size|human_size }}</span>
                                                 {% set st = (att.extraction or {}).get('status') %}
                                                 {% if st == 'pending' %}<span class="badge bg-warning text-dark ms-1">提取中</span>
                                                 {% elif st == 'failed' %}<span class="badge bg-danger ms-1">提取失败</span>

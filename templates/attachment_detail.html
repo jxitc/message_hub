@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}{{ attachment.name or 'Attachment' }} - Message Hub{% endblock %}
+
+{% block content %}
+{#
+  附件详情页：一个「附件的视图」，不是「图片的页面」。
+
+  页面结构刻意分成两半：
+    · 预览块按 kind 分支（图片/PDF/文本/音频…将来加类型只加这一块）
+    · 其余全部通用——大小、哈希、来源、提取状态、提取文本，都来自同一条记录
+  这样以后加录音、聊天导出、邮件文件，不需要新页面，只需要多一个 preview 分支。
+#}
+
+<div class="row mb-3">
+    <div class="col-12">
+        <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+            <div>
+                <h1 class="h4 mb-1">
+                    {% if attachment.kind == 'image' %}<i class="bi bi-image text-info"></i>
+                    {% elif attachment.kind == 'pdf' %}<i class="bi bi-file-earmark-pdf text-danger"></i>
+                    {% elif attachment.kind == 'audio' %}<i class="bi bi-music-note-beamed text-warning"></i>
+                    {% elif attachment.kind == 'text' %}<i class="bi bi-file-earmark-text text-secondary"></i>
+                    {% else %}<i class="bi bi-file-earmark text-secondary"></i>{% endif %}
+                    {{ attachment.name or '(未命名附件)' }}
+                </h1>
+                <p class="text-muted mb-0 small">
+                    {{ message.type }} · {{ message.sender or '未知来源' }} ·
+                    <span data-utc="{{ message.timestamp|utc_iso }}" data-fmt="datetime">{{ message.timestamp }}</span>
+                </p>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                {% if total > 1 %}
+                <div class="btn-group">
+                    <a class="btn btn-sm btn-outline-secondary {% if previous is none %}disabled{% endif %}"
+                       href="{{ url_for('web.attachment_detail', message_id=message.id, index=previous) if previous is not none else '#' }}">
+                        <i class="bi bi-chevron-left"></i>
+                    </a>
+                    <span class="btn btn-sm btn-outline-secondary disabled">{{ index + 1 }} / {{ total }}</span>
+                    <a class="btn btn-sm btn-outline-secondary {% if following is none %}disabled{% endif %}"
+                       href="{{ url_for('web.attachment_detail', message_id=message.id, index=following) if following is not none else '#' }}">
+                        <i class="bi bi-chevron-right"></i>
+                    </a>
+                </div>
+                {% endif %}
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.message_detail', message_id=message.id) }}">
+                    <i class="bi bi-card-text"></i> 查看消息
+                </a>
+                <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.messages') }}">
+                    <i class="bi bi-list-ul"></i> 返回列表
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row g-3">
+    <!-- 左：预览 -->
+    <div class="col-lg-7">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-eye"></i> 原件预览</span>
+                {% if preview_url %}
+                <a class="btn btn-sm btn-outline-primary" href="{{ preview_url }}" download="{{ attachment.name }}">
+                    <i class="bi bi-download"></i> 下载原件
+                    <span class="text-muted ms-1">{{ attachment.size|human_size }}</span>
+                </a>
+                {% endif %}
+            </div>
+            <div class="card-body text-center">
+                {% if not preview_url %}
+                <div class="text-muted py-4">这个附件没有存储原件（见下方"未存储"原因）</div>
+                {% elif attachment.kind == 'image' %}
+                <a href="{{ preview_url }}" target="_blank" rel="noopener">
+                    <img src="{{ preview_url }}" alt="{{ attachment.name }}"
+                         class="img-fluid rounded" style="max-height: 70vh;">
+                </a>
+                <div class="form-text mt-2">点击图片在新标签页打开原尺寸</div>
+                {% elif attachment.kind == 'text' %}
+                <pre class="text-start mb-0 mh-panel p-3" style="max-height:60vh;overflow:auto;"><code>{{ extracted_text if text_source == 'content' else '' }}</code></pre>
+                {% elif attachment.kind == 'pdf' %}
+                {# PDF 有意不做内嵌预览：我们给非图片一律下发 Content-Disposition: attachment
+                   （同源 XSS 防护的一环），内嵌反而会触发下载。这里直接把抽取出来的文字
+                   摆在最显眼的位置——那本来就是它的有用部分——原件用上面的按钮下载。 #}
+                <div class="text-muted py-3">
+                    <i class="bi bi-file-earmark-pdf fs-1 d-block mb-2"></i>
+                    PDF 不内嵌预览（原件请用右上角下载）。<br>
+                    文字已抽取，见右侧「提取结果」。
+                </div>
+                {% elif attachment.kind == 'audio' %}
+                <audio controls preload="none" src="{{ preview_url }}" class="w-100"></audio>
+                <div class="form-text mt-2">录音预览（转写文本见右侧）</div>
+                {% else %}
+                <div class="text-muted py-3">
+                    <i class="bi bi-file-earmark fs-1 d-block mb-2"></i>
+                    该类型没有内置预览，请下载原件查看。
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <!-- 右：处理信息 + 提取结果 -->
+    <div class="col-lg-5">
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-cpu"></i> 处理信息</div>
+            <div class="card-body">
+                {% set status = extraction.status or '(未处理)' %}
+                <p class="mb-2">
+                    <span class="badge
+                        {% if status == 'done' %}bg-success
+                        {% elif status == 'pending' %}bg-warning text-dark
+                        {% elif status == 'failed' %}bg-danger
+                        {% else %}bg-secondary{% endif %}">{{ status }}</span>
+                    {% if extraction.engine %}<span class="ms-2 small">引擎 <code>{{ extraction.engine }}</code></span>{% endif %}
+                </p>
+                <table class="table table-sm mb-2">
+                    <tbody>
+                        <tr><th class="text-muted fw-normal">提取字符</th>
+                            <td>{{ extraction.chars if extraction.chars is not none else 0 }}
+                                {% if extraction.pages %}（{{ extraction.pages }} 页{% if extraction.chars_per_page %}，约 {{ extraction.chars_per_page }} 字/页{% endif %}）{% endif %}</td></tr>
+                        <tr><th class="text-muted fw-normal">文本落位</th>
+                            <td>{% if extraction.applied_to_content %}已写入消息正文{% elif extracted_text %}保留在附件记录中{% else %}无{% endif %}</td></tr>
+                        {% if attachment.deduplicated %}
+                        <tr><th class="text-muted fw-normal">去重</th><td>相同内容此前已存在，未重复存储</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+
+                {# 提取异常必须显式说出来，而不是让用户自己猜为什么没文字 #}
+                {% if extraction.error %}
+                <div class="alert alert-warning py-2 small mb-2">
+                    <i class="bi bi-exclamation-triangle"></i> {{ extraction.error }}
+                </div>
+                {% endif %}
+                {% if extraction.note %}
+                <div class="form-text mb-2">{{ extraction.note }}</div>
+                {% endif %}
+                {% if extraction.chars_per_page and extraction.chars_per_page < 20 and extraction.pages and extraction.pages > 1 %}
+                <div class="alert alert-secondary py-2 small mb-2">
+                    每页平均只有 {{ extraction.chars_per_page }} 字，可能是扫描件被当成了有文本层。
+                    可以点下面的「强制 OCR 重跑」。
+                </div>
+                {% endif %}
+
+                <div class="d-flex gap-2 flex-wrap">
+                    <form method="POST" action="{{ url_for('web.attachment_reextract', message_id=message.id, index=index) }}">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit">
+                            <i class="bi bi-arrow-repeat"></i> 重新提取
+                        </button>
+                    </form>
+                    <form method="POST" action="{{ url_for('web.attachment_reextract', message_id=message.id, index=index) }}">
+                        <input type="hidden" name="force_ocr" value="yes">
+                        <button class="btn btn-sm btn-outline-secondary" type="submit"
+                                title="跳过 PDF 文本层，强制渲染后 OCR">
+                            <i class="bi bi-fonts"></i> 强制 OCR 重跑
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-info-circle"></i> 原件信息</div>
+            <div class="card-body">
+                <table class="table table-sm mb-0">
+                    <tbody>
+                        <tr><th class="text-muted fw-normal">大小</th>
+                            <td>{{ attachment.size|human_size }} <span class="text-muted small">({{ attachment.size }} 字节)</span></td></tr>
+                        <tr><th class="text-muted fw-normal">类型</th>
+                            <td><code>{{ attachment.mime }}</code> <span class="badge bg-secondary">{{ attachment.kind }}</span></td></tr>
+                        <tr><th class="text-muted fw-normal">来源</th>
+                            <td>{{ attachment.source or '未知' }}{% if attachment.origin %} · <span class="text-muted small">{{ attachment.origin }}</span>{% endif %}</td></tr>
+                        <tr><th class="text-muted fw-normal">sha256</th>
+                            <td><code class="small" style="word-break:break-all;">{{ attachment.sha256 }}</code></td></tr>
+                    </tbody>
+                </table>
+                <div class="form-text mt-2">
+                    sha256 既是内容指纹也是存储路径（内容寻址），所以相同文件不会重复存。
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <span><i class="bi bi-file-text"></i> 提取结果</span>
+                {% if extracted_text %}
+                <button class="btn btn-sm btn-outline-secondary"
+                        onclick="navigator.clipboard.writeText(document.getElementById('extracted').innerText)">
+                    <i class="bi bi-clipboard"></i> 复制
+                </button>
+                {% endif %}
+            </div>
+            <div class="card-body">
+                {% if extracted_text %}
+                <div class="form-text mb-2">
+                    {% if text_source == 'content' %}这段是消息的正文（提取结果填进了正文）。{% else %}这段是 OCR/提取的结果（消息正文已有内容，所以没覆盖它）。{% endif %}
+                </div>
+                <pre id="extracted" class="mb-0 mh-panel p-3" style="max-height:40vh;overflow:auto;white-space:pre-wrap;"><code>{{ extracted_text }}</code></pre>
+                {% else %}
+                <div class="text-muted">
+                    {% if status == 'pending' %}还在提取中，稍后刷新。{% else %}没有可显示的文本。{% endif %}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
