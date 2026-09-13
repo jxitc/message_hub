@@ -4,6 +4,7 @@ import com.jxitc.messagehub.domain.model.AttachmentExtraction
 import com.jxitc.messagehub.domain.model.ExtractedTextSource
 import com.jxitc.messagehub.domain.model.ExtractionStatus
 import com.jxitc.messagehub.domain.model.ServerAttachment
+import com.jxitc.messagehub.domain.model.SkippedAttachment
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -262,5 +263,58 @@ class AttachmentPreviewRulesTest {
             pages = 3
         )
         assertEquals("OCR 结果 · pdftoppm+tesseract · 3 页 · 928 字", AttachmentPreviewRules.detailLine(block))
+    }
+
+    // ---- 列表里"那一条消息"的附件摘要（不是列表页顶部横幅）----
+
+    @Test
+    fun `no attachments means no summary line`() {
+        assertEquals(null, AttachmentPreviewRules.attachmentsSummary(emptyList(), emptyList()))
+    }
+
+    @Test
+    fun `pending attachment summarises as extracting`() {
+        val summary = AttachmentPreviewRules.attachmentsSummary(
+            listOf(attachment(extraction = AttachmentExtraction(status = ExtractionStatus.PENDING))), emptyList())
+        assertEquals("1 个附件 · 提取中", summary)
+    }
+
+    @Test
+    fun `done attachments summarise total characters`() {
+        val summary = AttachmentPreviewRules.attachmentsSummary(
+            listOf(
+                attachment(extraction = AttachmentExtraction(status = ExtractionStatus.DONE, chars = 900)),
+                attachment(extraction = AttachmentExtraction(status = ExtractionStatus.DONE, chars = 28))
+            ), emptyList())
+        assertEquals("2 个附件 · 928 字", summary)
+    }
+
+    @Test
+    fun `failed attachments say so rather than showing zero characters`() {
+        val summary = AttachmentPreviewRules.attachmentsSummary(
+            listOf(attachment(extraction = AttachmentExtraction(status = ExtractionStatus.FAILED))), emptyList())
+        assertEquals("1 个附件 · 提取失败", summary)
+    }
+
+    @Test
+    fun `unsupported and empty have their own wording`() {
+        assertEquals("1 个附件 · 不支持", AttachmentPreviewRules.attachmentsSummary(
+            listOf(attachment(extraction = AttachmentExtraction(status = ExtractionStatus.UNAVAILABLE))), emptyList()))
+        assertEquals("1 个附件 · 无文字", AttachmentPreviewRules.attachmentsSummary(
+            listOf(attachment(extraction = AttachmentExtraction(status = ExtractionStatus.EMPTY))), emptyList()))
+    }
+
+    @Test
+    fun `skipped attachments are counted separately`() {
+        val summary = AttachmentPreviewRules.attachmentsSummary(
+            listOf(attachment(extraction = AttachmentExtraction(status = ExtractionStatus.DONE, chars = 12))),
+            listOf(SkippedAttachment(name = "big.zip", size = 2_000_000, reason = "类型不受支持")))
+        assertEquals("1 个附件 · 12 字 · 1 个未保存", summary)
+    }
+
+    @Test
+    fun `skipped only still produces a line`() {
+        assertEquals("1 个未保存", AttachmentPreviewRules.attachmentsSummary(
+            emptyList(), listOf(SkippedAttachment(name = "x.zip"))))
     }
 }

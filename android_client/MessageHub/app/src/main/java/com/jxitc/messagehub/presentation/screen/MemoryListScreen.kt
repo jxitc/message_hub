@@ -1,5 +1,6 @@
 package com.jxitc.messagehub.presentation.screen
 
+import com.jxitc.messagehub.domain.service.AttachmentPreviewRules
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.combinedClickable
@@ -64,7 +65,6 @@ fun MemoryListScreen(
     val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
     val isLoading by viewModel.isLoading.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
-    val isPollingAttachments by viewModel.attachmentPolling.collectAsStateWithLifecycle()
 
     // 页面可见性驱动附件状态轮询：可见才轮询，离开（进"添加记忆"/切后台）立刻停。
     // 用 LifecycleResumeEffect 而不是 DisposableEffect：切到别的 app 时 composable 还在，
@@ -134,21 +134,9 @@ fun MemoryListScreen(
             Spacer(modifier = Modifier.height(8.dp))
         }
 
-        // 附件提取轮询提示（只在列表页可见时有值）
-        if (isPollingAttachments) {
-            Row(
-                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                CircularProgressIndicator(modifier = Modifier.size(12.dp), strokeWidth = 2.dp)
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "正在等服务器提取附件文本…",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-        }
+        // 这里**故意不放**全局的"正在提取"横幅：等待与结果都属于某一条消息，
+        // 挂在列表顶部既说不清是哪条、又会一直占位。状态显示在那一行消息上
+        // （见 MemoryGroupCard 里的 attachmentsSummary），文本只在详情里看。
 
         // Content
         Box(modifier = Modifier.fillMaxSize()) {
@@ -358,6 +346,17 @@ private fun MemoryGroupCard(
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
+                                // 附件状态挂在**这一条消息**上（列表顶部不放全局横幅）
+                                AttachmentPreviewRules.attachmentsSummary(
+                                    m.attachments, m.skippedAttachments
+                                )?.let { summary ->
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    Text(
+                                        text = "\uD83D\uDCCE $summary",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                             BlockAppDropdownMenu(
                                 expanded = rowMenuOpen,

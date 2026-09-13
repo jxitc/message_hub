@@ -4,6 +4,7 @@ import com.jxitc.messagehub.domain.model.ExtractedTextBlock
 import com.jxitc.messagehub.domain.model.ExtractedTextSource
 import com.jxitc.messagehub.domain.model.ExtractionStatus
 import com.jxitc.messagehub.domain.model.ServerAttachment
+import com.jxitc.messagehub.domain.model.SkippedAttachment
 
 /**
  * 附件在**界面上怎么显示**的纯规则（无 Android 依赖 → 可在 JVM 单测里直接断言）。
@@ -137,6 +138,37 @@ object AttachmentPreviewRules {
 
     /** 附件类型图标（UI 映射到 Material Icon；纯字符串便于单测）。 */
     enum class AttachmentIcon { IMAGE, PDF, TEXT, FILE }
+
+    /**
+     * 列表里**那一条消息**的附件摘要（一行短文案），没有附件时返回 null。
+     *
+     * 放在消息行而不是列表页顶部：等待/结果属于**某一条**消息，全局横幅既说不清
+     * 是哪条，也会在滚动时一直占着位置。真正的提取文本只在消息详情里展示。
+     *
+     * 例：`1 个附件 · 提取中` / `2 个附件 · 928 字` / `1 个附件 · 提取失败 · 1 个未保存`
+     */
+    fun attachmentsSummary(
+        attachments: List<ServerAttachment>,
+        skipped: List<SkippedAttachment> = emptyList()
+    ): String? {
+        if (attachments.isEmpty() && skipped.isEmpty()) return null
+        val parts = mutableListOf<String>()
+        if (attachments.isNotEmpty()) {
+            parts += "${attachments.size} 个附件"
+            val statuses = attachments.map { it.extraction?.status ?: ExtractionStatus.UNKNOWN }
+            val totalChars = attachments.sumOf { it.extraction?.chars ?: 0 }
+            parts += when {
+                statuses.any { it == ExtractionStatus.PENDING } -> LABEL_PENDING
+                totalChars > 0 -> "$totalChars 字"
+                statuses.any { it == ExtractionStatus.FAILED } -> LABEL_FAILED
+                statuses.all { it == ExtractionStatus.UNAVAILABLE || it == ExtractionStatus.SKIPPED } ->
+                    LABEL_UNSUPPORTED
+                else -> LABEL_EMPTY
+            }
+        }
+        if (skipped.isNotEmpty()) parts += "${skipped.size} 个未保存"
+        return parts.joinToString(" · ")
+    }
 
     fun iconFor(attachment: ServerAttachment): AttachmentIcon = when {
         attachment.isImage -> AttachmentIcon.IMAGE
