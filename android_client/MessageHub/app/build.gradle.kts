@@ -13,8 +13,8 @@ android {
         applicationId = "com.jxitc.messagehub"
         minSdk = 24
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.6.2"
+        versionCode = 11
+        versionName = "1.6.3"
 
         // 只打包真机需要的 ABI。debug 包默认把 4 种架构的 native 库全塞进来
         // （x86/x86_64 是模拟器用的，armeabi-v7a 是老 32 位机），实测某含 ML Kit
