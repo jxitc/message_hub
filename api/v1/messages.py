@@ -6,6 +6,8 @@ from models import db, Message
 from schemas.message_schema import MessageCreateSchema, MessageResponseSchema, MessageListSchema
 import message_filters as _mf
 import metadata_policy as _policy
+from blob_store import BlobError, MAX_ATTACHMENT_BYTES
+from .blobs import attachment_public as _attachment_public
 
 message_create_schema = MessageCreateSchema()
 message_response_schema = MessageResponseSchema()
@@ -41,7 +43,7 @@ def get_messages():
             error_out=False
         )
         
-        messages = [message.to_dict() for message in pagination.items]
+        messages = [_with_attachments(message) for message in pagination.items]
         
         return jsonify({
             'messages': messages,
@@ -57,15 +59,66 @@ def get_messages():
 
 @api_v1.route('/messages', methods=['POST'])
 def create_message():
+    """Create a message, optionally with attachment files.
+
+    Two content types are accepted:
+
+    * `application/json` — the original shape, unchanged; used by the Android
+      collector for SMS/notifications.
+    * `multipart/form-data` — same fields plus repeated `attachments` file parts.
+      Used by manual capture (image / PDF / file) and by the mail collector.
+
+    Two ordering decisions matter here:
+
+    * Files are written to blob storage **before** the message row is committed.
+      A crash in between leaves an unreferenced file (swept later by
+      `BlobStore.collect_garbage`) rather than a message whose attachment is gone.
+    * Text extraction is **not** done in this request. A scanned PDF can take far
+      longer than a request should, and the hub runs one worker with two threads,
+      so a slow synchronous request would stall everything. The extractor picks
+      the message up in the background and fills `content`.
+    """
     try:
-        # Validate request data
-        json_data = request.get_json()
+        _reject_oversized_request()
+        is_multipart = bool(request.files) or request.mimetype == 'multipart/form-data'
+
+        if is_multipart:
+            json_data = _multipart_payload()
+            files = request.files.getlist('attachments')
+            if len(files) > MAX_FILES_PER_REQUEST:
+                return jsonify({'error': '一次最多上传 %d 个文件（收到 %d 个）'
+                                % (MAX_FILES_PER_REQUEST, len(files))}), 400
+        else:
+            json_data = request.get_json()
+            files = []
+
         if not json_data:
             return jsonify({'error': 'No JSON data provided'}), 400
-            
+
+        attachments, rejected = [], []
+        if files:
+            from .blobs import store_uploads
+            attachments, rejected = store_uploads(files)
+            if not attachments:
+                return jsonify({
+                    'error': (rejected[0]['error'] if rejected
+                              else '附件均未通过校验'),
+                    'rejected': rejected,
+                }), 415
+
+        has_text = bool((json_data.get('content') or '').strip())
+        if not has_text and not attachments:
+            # The one invariant the schema cannot express cleanly.
+            return jsonify({'error': 'content 不能为空（除非同时上传了附件）'}), 400
+        json_data.setdefault('content', '')
+
         # Validate against schema
         data = message_create_schema.load(json_data)
-        
+
+        metadata = data.get('metadata', {}) or {}
+        if attachments:
+            metadata['attachments'] = attachments
+
         # Create new message
         message = Message(
             source_device_id=data['source_device_id'],
@@ -73,7 +126,7 @@ def create_message():
             sender=data['sender'],
             content=data['content'],
             timestamp=data['timestamp'],
-            message_metadata=data.get('metadata', {}),
+            message_metadata=metadata,
             received_at=datetime.now(timezone.utc)
         )
         
@@ -91,18 +144,95 @@ def create_message():
         db.session.add(message)
         db.session.commit()
         
-        return jsonify({
+        payload = {
             'message': 'Message created successfully',
             'id': message.id,
             'data': message.to_dict()
-        }), 201
+        }
+        if attachments:
+            payload['attachments'] = [_attachment_public(a) for a in attachments]
+            payload['extraction'] = 'pending'
+            payload['note'] = ('文本提取在后台进行；稍后 GET /api/v1/messages/<id> '
+                               '即可看到 content 或 metadata.attachments[].extraction')
+        if rejected:
+            payload['rejected'] = rejected
+        return jsonify(payload), 201
         
     except ValidationError as e:
         return jsonify({'error': 'Validation error', 'details': e.messages}), 400
+    except BlobError as e:
+        # 413 太大 / 507 配额满 —— 都是客户端能理解并据以行动的错误
+        db.session.rollback()
+        return jsonify({'error': e.message}), e.status
     except Exception as e:
         current_app.logger.error(f"Error creating message: {str(e)}")
         db.session.rollback()
         return jsonify({'error': 'Internal server error'}), 500
+
+def _with_attachments(message):
+    """Message dict with attachments rewritten to carry a usable URL.
+
+    The stored metadata keeps only the storage key and facts about the bytes; the
+    URL is derived on read so that a future move to object storage never requires
+    rewriting stored rows. Unsigned only — clients authenticate with X-API-Key.
+    The web UI signs its own links (see api/v1/blobs.sign).
+    """
+    payload = message.to_dict()
+    metadata = dict(payload.get('metadata') or {})
+    attachments = metadata.get('attachments') or []
+    if attachments:
+        metadata['attachments'] = [_attachment_public(a) for a in attachments]
+        payload['metadata'] = metadata
+    return payload
+
+
+#: How many files one request may carry. A per-file cap alone is not enough: a
+#: client could send a hundred 1MB files and the body would be read into memory
+#: before any of them is validated. The byte ceiling below sits just above
+#: MAX_FILES_PER_REQUEST * MAX_ATTACHMENT_BYTES so the two agree.
+MAX_FILES_PER_REQUEST = 8
+#: Matches nginx's client_max_body_size (see deploy/deploy.sh) so the proxy and
+#: the app reject the same requests instead of disagreeing.
+MAX_REQUEST_BYTES = 16 * 1024 * 1024
+
+
+def _reject_oversized_request():
+    """Fail fast on an absurd body before doing any work.
+
+    nginx enforces the same byte limit, but that only protects the public path: a
+    direct request to gunicorn (or a future different proxy) would not be capped,
+    and a large body read into memory on a 960MB box is a denial of service
+    waiting to happen.
+    """
+    declared = request.content_length
+    if declared and declared > MAX_REQUEST_BYTES:
+        raise BlobError('请求体过大（%.1f MB，上限 %.1f MB）'
+                        % (declared / 1048576, MAX_REQUEST_BYTES / 1048576), status=413)
+
+
+def _multipart_payload():
+    """Rebuild the JSON payload shape from multipart form fields.
+
+    `metadata` arrives as a JSON *string*, since multipart has no nested values.
+    A malformed one is rejected rather than dropped: silently losing metadata is
+    worse than a 400.
+    """
+    import json as _json
+    payload = {}
+    for key in ('source_device_id', 'type', 'sender', 'content', 'timestamp'):
+        value = request.form.get(key)
+        if value is not None:
+            payload[key] = value
+    raw_metadata = request.form.get('metadata')
+    if raw_metadata:
+        try:
+            payload['metadata'] = _json.loads(raw_metadata)
+        except ValueError as exc:
+            raise BlobError('metadata 不是合法 JSON：%s' % exc)
+    else:
+        payload['metadata'] = {}
+    return payload
+
 
 @api_v1.route('/messages/<message_id>', methods=['GET'])
 def get_message(message_id):
@@ -111,7 +241,7 @@ def get_message(message_id):
         if not message:
             return jsonify({'error': 'Message not found'}), 404
             
-        return jsonify(message.to_dict())
+        return jsonify(_with_attachments(message))
         
     except Exception as e:
         current_app.logger.error(f"Error getting message {message_id}: {str(e)}")

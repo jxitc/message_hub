@@ -30,6 +30,11 @@ def create_app():
     
     # Optional: start IMAP mail collector thread if MAIL_ACCOUNTS is configured
     maybe_start_mail_collector(app)
+
+    # Attachment text extraction (OCR / PDF). Off by default in tests, where the
+    # thread would fight the test database and shell out to tesseract for nothing.
+    if os.environ.get('EXTRACT_WORKER', '1') != '0':
+        maybe_start_extraction(app)
     
     # Health check endpoint
     @app.route('/health')
@@ -60,6 +65,30 @@ def create_app():
             return redirect(url_for('web.dashboard'))
     
     return app
+
+def maybe_start_extraction(app):
+    """Start the background attachment-extraction thread (extraction.py).
+
+    The queue lives in the database, so this is safe to start unconditionally:
+    with no pending attachments the loop is a cheap query every EXTRACT_INTERVAL
+    seconds. Set EXTRACT_WORKER=0 to disable (tests).
+    """
+    try:
+        import extraction
+    except Exception as exc:
+        app.logger.error('extraction worker NOT started: %s', exc)
+        return None
+    try:
+        engines = extraction.available_engines()
+        if not any((engines.get('pdftotext'), engines.get('tesseract'))):
+            app.logger.warning(
+                'extraction worker started WITHOUT engines (install poppler-utils '
+                'and tesseract-ocr); attachments will be marked unavailable')
+        return extraction.start_worker(app)
+    except Exception as exc:
+        app.logger.error('extraction worker failed to start: %s', exc)
+        return None
+
 
 def maybe_start_mail_collector(app):
     """Start the optional IMAP mail collector thread (mail_collector.py).

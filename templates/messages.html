@@ -222,6 +222,31 @@
                                             <p class="mb-1">{{ message.content or 'No content' }}</p>
                                         </div>
 
+                                        <!-- Attachments (原件）-->
+                                        {% set atts = (message.message_metadata or {}).get('attachments') %}
+                                        {% if atts %}
+                                        <div class="mt-2 d-flex flex-wrap gap-2 align-items-center">
+                                            {% for att in atts %}
+                                            <a href="{{ attachment_url(att.key) }}"
+                                               class="btn btn-sm btn-outline-info"
+                                               title="{{ att.name }} · {{ (att.size / 1024)|round(1) }} KB">
+                                                {% if att.kind == 'image' %}<i class="bi bi-image"></i>
+                                                {% elif att.kind == 'pdf' %}<i class="bi bi-file-earmark-pdf"></i>
+                                                {% else %}<i class="bi bi-file-earmark"></i>{% endif %}
+                                                {{ att.name|truncate(24) }}
+                                                <span class="text-muted ms-1">{{ (att.size / 1024)|round(0)|int }}K</span>
+                                                {% set st = (att.extraction or {}).get('status') %}
+                                                {% if st == 'pending' %}<span class="badge bg-warning text-dark ms-1">提取中</span>
+                                                {% elif st == 'failed' %}<span class="badge bg-danger ms-1">提取失败</span>
+                                                {% elif st == 'empty' %}<span class="badge bg-secondary ms-1">无文字</span>
+                                                {% elif st in ('unavailable', 'skipped') %}<span class="badge bg-secondary ms-1">{{ st }}</span>
+                                                {% elif st == 'done' %}<span class="badge bg-success ms-1">{{ att.extraction.chars or 0 }} 字</span>
+                                                {% endif %}
+                                            </a>
+                                            {% endfor %}
+                                        </div>
+                                        {% endif %}
+
                                         <!-- Message Metadata -->
                                         <div class="message-meta">
                                             <small class="text-muted">
@@ -233,6 +258,16 @@
                                                     {{ message.source_device_id or 'Unknown Device' }}
                                                 </span>
 
+                                                {% set atts = (message.message_metadata or {}).get('attachments') %}
+                                                {% if atts %}
+                                                <span class="ms-3">
+                                                    <i class="bi bi-paperclip"></i>
+                                                    {{ atts|length }} 个附件
+                                                    {% if atts|selectattr('extraction.status', 'equalto', 'pending')|list %}
+                                                    <span class="badge bg-warning text-dark ms-1">提取中</span>
+                                                    {% endif %}
+                                                </span>
+                                                {% endif %}
                                                 {% set rcpts = (message.message_metadata or {}).get('recipients') %}
                                                 {% if rcpts %}
                                                 <span class="ms-3">

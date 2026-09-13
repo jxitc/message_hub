@@ -23,6 +23,7 @@ SERVER="${MH_SERVER:-188.166.172.192}"
 SSH_USER="${MH_SSH_USER:-root}"
 PORT="${MH_PORT:-5001}"
 WORKERS="${MH_WORKERS:-1}"
+TIMEOUT="${MH_TIMEOUT:-120}"   # 多部分上传/尾部慢链路留余量（提取是异步的，不占请求）
 REMOTE_DIR="${MH_REMOTE_DIR:-/opt/message_hub}"
 APP_NAME="message-hub"
 
@@ -120,7 +121,7 @@ Type=simple
 User=root
 WorkingDirectory=$REMOTE_DIR
 EnvironmentFile=$REMOTE_DIR/.env
-ExecStart=$REMOTE_DIR/venv/bin/gunicorn -w ${WORKERS} --threads 2 -b 0.0.0.0:${PORT} --timeout 60 "app:create_app()"
+ExecStart=$REMOTE_DIR/venv/bin/gunicorn -w ${WORKERS} --threads 2 -b 0.0.0.0:${PORT} --timeout ${TIMEOUT} "app:create_app()"
 Restart=on-failure
 RestartSec=3
 
@@ -135,6 +136,13 @@ systemctl restart ${APP_NAME}
 # firewall
 if command -v ufw >/dev/null 2>&1; then
   echo "==> firewall (ufw)"
+  # 附件上传：nginx 默认 client_max_body_size 是 1MB，而单个附件上限正好是 1MB，
+  # 加上 multipart 开销就会 413。给 API 单独放宽。
+  cat > /etc/nginx/conf.d/mh-upload.conf <<'NGINX'
+# 由 deploy.sh 写入：附件上传的体积上限。
+client_max_body_size 16m;
+NGINX
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx || true
   ufw allow OpenSSH >/dev/null 2>&1 || true
   ufw allow ${PORT}/tcp >/dev/null 2>&1 || true
   ufw --force enable >/dev/null 2>&1 || true

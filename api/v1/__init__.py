@@ -29,6 +29,16 @@ def require_api_key():
     if request.method == 'GET' and request.path.startswith('/api/v1/releases/'):
         return None
 
+    # 附件下载同理：浏览器 <img>/<a> 带不了 header，所以允许用 HMAC 签名 token
+    # 代替 key。注意这里**只**豁免验证通过的签名链接，没有 token 或 token 过期
+    # 仍然走下面的 key 校验（保持默认拒绝）。
+    if (request.method == 'GET' and request.path.startswith('/api/v1/blobs/')
+            and request.args.get('token')):
+        from .blobs import verify
+        key = request.path[len('/api/v1/blobs/'):]
+        if verify(key, request.args.get('token', '')):
+            return None
+
     provided = (request.headers.get('X-API-Key') or '').strip()
     if provided:
         h = _hash_key(provided)
@@ -66,4 +76,4 @@ def require_api_key():
                     'message': 'Invalid or missing API key'}), 401
 
 
-from . import messages, devices, sync, diagnostics, releases
+from . import messages, devices, sync, diagnostics, releases, blobs

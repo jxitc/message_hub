@@ -29,7 +29,14 @@ def _page_href(page):
     return url_for('web.messages', **args)
 
 
+def _attachment_url(key):
+    """Signed, expiring download URL for the web UI (see web.download_attachment)."""
+    from api.v1.blobs import sign
+    return url_for('web.download_attachment', key=key, t=sign(key))
+
+
 web.add_app_template_filter(_utc_iso, 'utc_iso')
+web.add_app_template_global(_attachment_url, 'attachment_url')
 web.add_app_template_global(_page_href, 'page_href')
 
 from . import views

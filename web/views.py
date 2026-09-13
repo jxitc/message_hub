@@ -9,6 +9,11 @@ import os
 import threading
 import time
 import message_filters as _mf
+from blob_store import BlobStore as _BlobStore
+
+
+def _blob_store():
+    return _BlobStore()
 
 # ---------------------------------------------------------------------------
 # Manual "Import Email" trigger (Dashboard button)
@@ -253,6 +258,37 @@ def _messages_redirect():
         if bare:
             args[key] = bare
     return redirect(url_for('web.messages', **args))
+
+
+@web.route('/attachments/<path:key>')
+def download_attachment(key):
+    """Serve an attachment to the browser.
+
+    The browser cannot send an X-API-Key header, so the web UI signs the link
+    itself (HMAC + expiry, see api/v1/blobs.sign) rather than making the blob
+    public. That keeps the API-key-only model intact for programme clients while
+    still allowing <img> and plain links here.
+    """
+    import message_filters as _filters  # noqa: F401  (keeps import style local)
+    from api.v1.blobs import verify
+    store = _blob_store()
+    if not verify(key, request.args.get('t', '')):
+        flash('下载链接无效或已过期，请刷新页面重试。', 'error')
+        return redirect(url_for('web.messages'))
+    if not store.exists(key):
+        flash('附件不存在（可能已被清理）。', 'error')
+        return redirect(url_for('web.messages'))
+
+    from blob_store import ext_to_mime
+    mime = ext_to_mime(key)
+    response = _send_from_directory(os.path.dirname(store.path(key)),
+                                    os.path.basename(store.path(key)),
+                                    mimetype=mime, conditional=True)
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['Content-Disposition'] = ('inline' if mime.startswith('image/')
+                                               else 'attachment')
+    response.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+    return response
 
 
 @web.route('/messages/delete', methods=['POST'])

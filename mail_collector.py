@@ -394,6 +394,84 @@ def parse_message(raw):
     return parsed
 
 
+#: 与服务器端 blob_store.MAX_ATTACHMENT_BYTES 保持一致。超限的附件不传，但会在
+#: metadata 里留一条记录——"这封信有附件、只是没存"和"这封信没附件"是两回事。
+MAX_ATTACHMENT_BYTES = int(os.environ.get('MAX_ATTACHMENT_BYTES') or 1024 * 1024)
+
+
+#: 服务器不可达时用的兜底（与 api/v1/blobs.ALLOWED_MIME 一致）。
+#: 正常情况下向服务器问一次，避免两边各抄一份白名单导致漂移。
+FALLBACK_ALLOWED_MIME = frozenset((
+    'image/png', 'image/jpeg', 'image/gif', 'image/webp',
+    'application/pdf', 'text/plain'))
+
+
+def fetch_limits(mh_url, timeout=REQUEST_TIMEOUT):
+    """Ask MH what it accepts: (max_bytes, allowed_mime_set).
+
+    Best-effort: a failure falls back to the published defaults rather than
+    skipping attachments entirely.
+    """
+    url = '%s/api/v1/attachments/limits' % mh_url.rstrip('/')
+    headers = {}
+    api_key = os.environ.get('MH_API_KEY')
+    if api_key:
+        headers['X-API-Key'] = api_key
+    try:
+        resp = requests.get(url, headers=headers, timeout=timeout)
+        if resp.status_code == 200:
+            body = resp.json()
+            return (int(body.get('max_bytes') or MAX_ATTACHMENT_BYTES),
+                    frozenset(body.get('allowed') or FALLBACK_ALLOWED_MIME))
+        log.warning('limits endpoint returned HTTP %s; using fallback', resp.status_code)
+    except Exception as exc:
+        log.warning('could not read attachment limits (%s); using fallback', exc)
+    return MAX_ATTACHMENT_BYTES, FALLBACK_ALLOWED_MIME
+
+
+def split_attachments(msg, max_bytes=None, allowed=None):
+    """Split a parsed message into (attachments, skipped).
+
+    attachments: [(filename, mime, bytes)] that MH can store.
+    skipped:     [{'name', 'size', 'reason'}] kept in metadata so the fact that a
+                 file existed is never lost, even when we do not store it.
+
+    Filtering here (rather than letting the server reject) is what preserves that
+    record: the server can only say "I refused this file", it cannot write the note
+    back into the message it already stored.
+    """
+    max_bytes = max_bytes or MAX_ATTACHMENT_BYTES
+    allowed = allowed or FALLBACK_ALLOWED_MIME
+    attachments, skipped = [], []
+    for part in msg.walk():
+        if part.get_content_maintype() == 'multipart':
+            continue
+        disposition = (part.get_content_disposition() or '').lower()
+        filename = part.get_filename()
+        content_type = part.get_content_type()
+        is_body = content_type in ('text/plain', 'text/html') and disposition != 'attachment'
+        if is_body or not (disposition == 'attachment' or filename):
+            continue
+        name = decode_mime_header(filename) or 'attachment'
+        try:
+            payload = part.get_payload(decode=True) or b''
+        except Exception:
+            skipped.append({'name': name, 'size': 0, 'reason': '无法解码该附件'})
+            continue
+        size = len(payload)
+        if not payload:
+            skipped.append({'name': name, 'size': 0, 'reason': '空附件'})
+        elif size > max_bytes:
+            skipped.append({'name': name, 'size': size, 'mime': content_type,
+                            'reason': '超过 %d KB 上限，未存储' % (max_bytes // 1024)})
+        elif content_type not in allowed:
+            skipped.append({'name': name, 'size': size, 'mime': content_type,
+                            'reason': '类型不受支持，未存储'})
+        else:
+            attachments.append((name, content_type, payload))
+    return attachments, skipped
+
+
 def build_payload(parsed, label):
     """Build the MH POST /api/v1/messages payload from a parsed mail.
 
@@ -420,6 +498,8 @@ def build_payload(parsed, label):
     }
     if parsed.get('recipients'):
         metadata['recipients'] = parsed['recipients']
+    if parsed.get('attachments_skipped'):
+        metadata['attachments_skipped'] = parsed['attachments_skipped']
     return {
         'source_device_id': device_id,
         'type': 'EMAIL',
@@ -536,15 +616,35 @@ def mark_seen(conn, uid):
         log.warning('could not mark uid %s as seen', uid, exc_info=True)
 
 
-def report_message(payload, mh_url=DEFAULT_MH_URL, timeout=REQUEST_TIMEOUT):
-    """POST one message to MH. Returns (ok: bool, detail: str)."""
+def report_message(payload, mh_url=DEFAULT_MH_URL, timeout=REQUEST_TIMEOUT,
+                   attachments=None):
+    """POST one message to MH. Returns (ok: bool, detail: str).
+
+    With attachments the request becomes multipart/form-data (the hub stores the
+    bytes and extracts text from them asynchronously); without them it stays the
+    plain JSON path. `metadata` is serialised to a JSON string in the multipart
+    case because multipart has no nested values.
+    """
     url = '%s/api/v1/messages' % mh_url.rstrip('/')
     headers = {}
     api_key = os.environ.get('MH_API_KEY')
     if api_key:
         headers['X-API-Key'] = api_key
     try:
-        resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
+        if attachments:
+            data = {k: v for k, v in payload.items() if k != 'metadata'}
+            data['metadata'] = json.dumps(payload.get('metadata') or {},
+                                          ensure_ascii=False)
+            files = [('attachments', (name, blob, mime or 'application/octet-stream'))
+                     for name, mime, blob in attachments]
+            # REQUEST_TIMEOUT 是 (connect, read) 元组；上传要单独放宽 read 超时，
+            # 不能拿元组和整数比较（踩过）。
+            upload_timeout = ((timeout[0], max(timeout[1], 120))
+                              if isinstance(timeout, tuple) else max(timeout, 120))
+            resp = requests.post(url, data=data, files=files, headers=headers,
+                                 timeout=upload_timeout)
+        else:
+            resp = requests.post(url, json=payload, headers=headers, timeout=timeout)
         if resp.status_code == 201:
             return True, resp.text
         return False, 'HTTP %s: %s' % (resp.status_code, resp.text[:500])
@@ -552,8 +652,14 @@ def report_message(payload, mh_url=DEFAULT_MH_URL, timeout=REQUEST_TIMEOUT):
         return False, str(exc)
 
 
-def process_mailbox(account, state, mh_url, dry_run=False, since_days=None):
+def process_mailbox(account, state, mh_url, dry_run=False, since_days=None,
+                    attachments_only=False):
     """Collect one mailbox. Returns {imported, failed, skipped}.
+
+    attachments_only=True -> import only mails that actually carry an attachment.
+                        Meant for archive backfills (years of invoices): the point
+                        is the files and their text, not thousands of old chatty
+                        emails flooding the timeline.
 
     since_days=None  -> legacy UNSEEN mode (marks mails \\Seen as it goes).
     since_days=N     -> "recent N days" mode: pulls ALL mails (seen or not)
@@ -569,6 +675,10 @@ def process_mailbox(account, state, mh_url, dry_run=False, since_days=None):
         processed = {}
     now = time.time()
 
+    limits = fetch_limits(mh_url)
+    log.info('[%s] attachment limits: %d KB, %d types',
+             label, limits[0] // 1024, len(limits[1]))
+
     conn = connect_account(account)
     try:
         if since_days is not None:
@@ -583,6 +693,9 @@ def process_mailbox(account, state, mh_url, dry_run=False, since_days=None):
             try:
                 raw = fetch_raw(conn, uid)
                 parsed = parse_message(raw)
+                raw_message = (email.message_from_bytes(raw)
+                               if isinstance(raw, bytes)
+                               else email.message_from_string(raw))
                 msg_key = parsed['message_id'] or uid_key
 
                 if msg_key in processed or uid_key in processed:
@@ -599,14 +712,25 @@ def process_mailbox(account, state, mh_url, dry_run=False, since_days=None):
                         continue
 
                 payload = build_payload(parsed, label)
+
+                # Attachments: allowed ones are uploaded as bytes, the rest are
+                # recorded so the fact that the mail *had* an attachment survives.
+                attachments, skipped = split_attachments(raw_message, *limits)
+                if attachments_only and not attachments:
+                    stats['skipped'] += 1
+                    continue
+                if skipped:
+                    payload['metadata']['attachments_skipped'] = skipped
+
                 if dry_run:
                     log.info('[dry-run] would POST mailbox=%s uid=%s '
-                             'sender=%s subject=%r',
-                             label, uid, parsed['sender'], parsed['subject'])
+                             'sender=%s subject=%r attachments=%d skipped=%d',
+                             label, uid, parsed['sender'], parsed['subject'],
+                             len(attachments), len(skipped))
                     stats['imported'] += 1
                     continue
 
-                ok, detail = report_message(payload, mh_url)
+                ok, detail = report_message(payload, mh_url, attachments=attachments)
                 if ok:
                     processed[msg_key] = now
                     processed[uid_key] = now
@@ -637,7 +761,7 @@ def process_mailbox(account, state, mh_url, dry_run=False, since_days=None):
 # ---------------------------------------------------------------------------
 
 def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None,
-             since_days=None):
+             since_days=None, attachments_only=False):
     """Collect every configured mailbox once. Returns
     {mailbox_label: {imported, failed, skipped}}."""
     accounts = accounts if accounts is not None else load_accounts()
@@ -655,7 +779,8 @@ def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None,
         label = acc['label']
         try:
             stats[label] = process_mailbox(acc, state, mh_url, dry_run=dry_run,
-                                           since_days=since_days)
+                                           since_days=since_days,
+                                           attachments_only=attachments_only)
         except Exception:
             stats[label] = {'imported': 0, 'failed': 0, 'skipped': 0,
                             'error': 'mailbox failed'}
@@ -668,7 +793,7 @@ def run_once(state_dir=None, dry_run=False, accounts=None, mh_url=None,
 
 
 def run_collector_loop(interval=300, state_dir=None, dry_run=False, logger=None,
-                       since_days=None):
+                       since_days=None, attachments_only=False):
     """Run forever: collect, sleep, repeat. `interval` is seconds."""
     global log
     if logger is not None:
@@ -676,7 +801,8 @@ def run_collector_loop(interval=300, state_dir=None, dry_run=False, logger=None,
     while True:
         try:
             stats = run_once(state_dir=state_dir, dry_run=dry_run,
-                             since_days=since_days)
+                             since_days=since_days,
+                             attachments_only=attachments_only)
             log.info('collect cycle finished: %s', stats)
         except Exception:
             log.exception('collect cycle crashed')
@@ -699,6 +825,10 @@ def main(argv=None):
                         help='pull ALL mail (seen or not) from the last N days '
                              'instead of only UNSEEN mail; does not alter '
                              '\\Seen flags on the mailbox')
+    parser.add_argument('--attachments-only', action='store_true',
+                        help='only import mails that carry an attachment '
+                             '(archive backfills: years of invoices, without '
+                             'flooding the timeline with old chatty mail)')
     parser.add_argument('--state-dir', default=None,
                         help='directory for processed_mails.json '
                              '(default: ~/.message_hub or $MAIL_STATE_DIR)')
@@ -714,10 +844,12 @@ def main(argv=None):
         log.info('starting watch loop (interval=%ss, dry_run=%s, since_days=%s)',
                  args.watch, args.dry_run, args.since_days)
         run_collector_loop(interval=args.watch, state_dir=args.state_dir,
-                           dry_run=args.dry_run, since_days=args.since_days)
+                           dry_run=args.dry_run, since_days=args.since_days,
+                           attachments_only=args.attachments_only)
     else:
         stats = run_once(state_dir=args.state_dir, dry_run=args.dry_run,
-                         since_days=args.since_days)
+                         since_days=args.since_days,
+                         attachments_only=args.attachments_only)
         print(json.dumps(stats, ensure_ascii=False, indent=2))
         log.info('cycle done: %s', stats)
 

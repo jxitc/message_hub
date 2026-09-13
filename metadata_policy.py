@@ -49,10 +49,20 @@
 
 from __future__ import annotations
 
+#: 消息类型词表。加新类型只改这里：API 校验与文档都引用它。
+MESSAGE_TYPES = (
+    'SMS',                # 短信
+    'PUSH_NOTIFICATION',  # App 通知
+    'CALL_LOG',           # 通话记录
+    'EMAIL',              # 邮件（含附件）
+    'NOTE',               # 手动记录（文本/图片）
+    'DOCUMENT',           # 上传的文件（PDF 等）
+)
+
 #: 列（这些字段不进 JSON）。
 CORE_COLUMNS = {
     'timestamp': ('何时发生', 'naive UTC；DB 里存的就是这个格式'),
-    'type': ('什么类型', 'SMS / PUSH_NOTIFICATION / CALL_LOG / EMAIL'),
+    'type': ('什么类型', ' / '.join(MESSAGE_TYPES)),
     'sender': ('谁发的', '显示用对端标识，地址或名称都可能'),
     'source_device_id': ('从哪来的', '来源设备/实例，如 android-phone-1、mail-main'),
     'content': ('内容', '纯文本正文'),

@@ -288,4 +288,47 @@ Time:...`），显示层又要剥一遍，冗余不正式。
 - **顺手修**：`scripts/audit-metadata.py` 在空库上不再抛 SQLAlchemy 栈，改为明确提示
   （本地开发库此前被测试误删过表，已重新建表恢复）。
 - 验证：pytest 47 例全过；线上 `--policy` 输出与审计报表均正常（3,457 次重复键明细可复现）。
+## 2026-09-13（附件与原件全链路：存储 + 上传 + OCR/PDF 提取 + 手机端）
+
+- **决定**：原件一律保留（用户明确"原图和文件都要上传保留"）；单文件上限 **1MB**，
+  图片超限由手机端压缩，PDF 无法压缩直接拒绝；文件落服务器本地磁盘，
+  但**结构上为迁移 R2 准备**（内容寻址 key + 存储抽象 + 稳定下载入口）。
+- **存储层 `blob_store.py`**：内容寻址 `blobs/<sha[0:2]>/<sha[2:4]>/<sha256><ext>`；
+  **key 由内容派生**（扩展名取自嗅探到的 magic bytes，不采信客户端 Content-Type 与文件名）
+  → 路径穿越从结构上不可能、重复上传天然幂等；写临时文件后原子 `os.replace`；
+  先写字节后写库（崩溃只留孤儿，不留悬挂引用）；`collect_garbage` 做 mark-and-sweep；
+  配额到线返回 507 而不是把磁盘写满（磁盘满会让 SQLite 写失败）。
+- **限制与白名单**：1MB/文件、8 文件/请求、16MB/请求（与 nginx `client_max_body_size` 对齐）；
+  允许 png/jpeg/gif/webp/pdf/text（按内容嗅探）；**明确拒绝 svg/html/js/xml**
+  （它们是文本但会在浏览器执行脚本）。
+- **接口**：`POST /api/v1/messages` 支持 `multipart/form-data`（`metadata` 为 JSON 字符串；
+  有附件时 `content` 可为空）；`GET /api/v1/attachments/limits`（客户端先问再压，别靠 413 试错）；
+  `GET /api/v1/blobs/<key>` 稳定下载入口，`X-API-Key` 或 **HMAC 签名 token**（浏览器 `<img>` 带不了
+  header，当年 APK 踩过同一个坑）；`GET /api/v1/blobs` 用量与引擎状态。
+- **文本提取 `extraction.py`**（异步后台线程，30s 轮询；1 核机器上一张扫描件可能几十秒，
+  同步会把 `-w 1 --threads 2` 的整个服务堵住）：PDF 用 `pdftotext`，**无文本层自动回退**
+  `pdftoppm`+`tesseract`（最多 10 页）；图片 `tesseract -l eng+chi_sim`（中英文都已安装）；
+  纯文本依次试 utf-8/gb18030/latin-1。
+  **提取文本的落位（只有一份，绝不重复）**：`content` 为空 → 写进 `content`；
+  `content` 已有文本 → 留在 `metadata.attachments[i].extraction.text`（追加会混淆
+  "发件人写的"与"OCR 猜的"，且重跑会追加两遍）。两种都在库里，下游 AI 读同一种数据、永不开文件。
+  可重跑：`scripts/reextract.py --status/--pending/--all/--engines`。
+- **邮件侧**：收集器先向 `/api/v1/attachments/limits` 问一次限额（不在本地再抄白名单），
+  允许的走 multipart 上传，其余记 `metadata.attachments_skipped`——
+  "有附件但没存"和"没附件"必须可分辨。新增 `--attachments-only`（历史发票归档用）与
+  `scripts/backfill-mail-attachments.py`（给上线前导入的邮件补附件）。
+- **手机端**（同一目标，独立提交）：手动添加支持选图/选文件；≤1MB 原样上传（编码器零调用），
+  >1MB 走降采样+长边 2048+JPEG q80→q50；非图片超限直接拒绝；`sender`=设备名（`Build.MODEL`）；
+  新增 79 个单测（共 97）全部通过；构建成功（APK 25.8MB）。
+- **运维**：`scripts/blob-gc.py`（先列后删，数字诚实）；deploy.sh 写入 nginx 16m 并把
+  gunicorn 超时做成 `MH_TIMEOUT`（默认 120，多部分上传在慢链路下别被掐断）。
+- **修掉两个真 bug**：① 超大文件返回 415 而非 413（大小是硬错误，类型才是逐文件拒绝）；
+  ② `reset_status` 用浅拷贝改 metadata，导致 SQLAlchemy 比较新旧值"深度相等"→ **不发 UPDATE**，
+  重跑提取静默无效。已补"必须用新 session 回查才抓得到"的回归测试。
+- **验证**：pytest 86 例全过；线上端到端 42KB PNG → tesseract OCR、13KB PDF → pdftotext，
+  文本分别按规则落进 `content` / `metadata`；下载字节 `cmp` 一致；无密钥 401、签名链接匿名可下；
+  非图片强制 attachment + nosniff；收集器 multipart 路径线上打通；GC 在真实孤儿上验证。
+- **未做（已记录）**：独立 blob 子域 `blob.mh.jxitc.com`（当前与 Web UI 同源，靠
+  Content-Disposition + nosniff 防护）；真机验证（未连 USB）。
+- 新文档：`docs/attachments.md`（含"为什么字节不进 DB"、迁移到 R2 的步骤、安全说明）。
 
