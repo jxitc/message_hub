@@ -1,18 +1,19 @@
 package com.jxitc.messagehub.data.remote
 
 import com.jxitc.messagehub.data.local.AppPreferences
+import com.jxitc.messagehub.domain.model.AttachmentLimits
+import com.jxitc.messagehub.domain.model.AttachmentPayload
 import com.jxitc.messagehub.domain.model.Memory
 import com.jxitc.messagehub.domain.model.MemoryCreationRequest
 import com.jxitc.messagehub.domain.model.ProcessingResult
-import com.jxitc.messagehub.domain.model.SourceType
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
+import retrofit2.Response
 import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
-import java.time.Instant
 import java.util.concurrent.TimeUnit
 
 /**
@@ -97,7 +98,11 @@ class MessageHubApiClient(
                         )
                     )
                 } else {
-                    val errorMsg = describeHttpError(response.code(), response.message())
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
                     Logger.e("MH API error: $errorMsg")
                     ProcessingResult.Error("Network error: $errorMsg")
                 }
@@ -107,6 +112,104 @@ class MessageHubApiClient(
             }
         }
     }
+
+    /**
+     * 带附件的提交：`POST /api/v1/messages` multipart/form-data（契约见 [MessageMultipartBuilder]）。
+     *
+     * type 由附件决定：带了非图片附件（PDF/文本）→ `DOCUMENT`，否则 `NOTE`；
+     * sender 按产品决定填**设备名**（`Build.MODEL` 去空格，见 AppPreferences.manualSender）。
+     * 附件字节已经在上传前准备好（该压的已经压过），这里不再做任何处理。
+     */
+    suspend fun createMemoryWithAttachments(
+        request: MemoryCreationRequest,
+        attachments: List<AttachmentPayload>,
+        maxBytes: Long = AttachmentLimits.fallback().maxBytes
+    ): ProcessingResult<Memory> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val apiService = createApiService()
+                val type = MessageMapper.mapManualType(attachments.map { it.mimeType })
+                val sender = preferences.manualSender
+                val body = MessageMultipartBuilder.build(
+                    sourceDeviceId = preferences.deviceId,
+                    type = type,
+                    sender = sender,
+                    content = request.content,
+                    timestamp = MessageMapper.isoTimestampUtc(request.metadata["timestamp"]?.toLongOrNull()),
+                    metadata = request.metadata,
+                    attachments = attachments
+                )
+
+                Logger.i(
+                    "Creating MH message with ${attachments.size} attachment(s): " +
+                        "type=$type, sender=$sender, content=${request.content.length} chars"
+                )
+
+                val response = apiService.createMessageMultipart(body)
+
+                if (response.isSuccessful) {
+                    val responseBody = response.body()
+                    val serverId = responseBody?.id ?: responseBody?.data?.id
+                    Logger.i("Message with attachments created on MH server (HTTP ${response.code()}): id=$serverId")
+                    ProcessingResult.Success(
+                        Memory(
+                            title = request.content.take(50).ifBlank {
+                                attachments.firstOrNull()?.fileName ?: "附件"
+                            },
+                            content = request.content,
+                            sourceType = request.sourceType,
+                            metadata = request.metadata,
+                            isUploaded = true
+                        )
+                    )
+                } else {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message(),
+                        maxBytes = maxBytes
+                    )
+                    Logger.e("MH attachment upload failed: $errorMsg")
+                    ProcessingResult.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                Logger.e("Failed to upload attachments to MH server: ${e.message}", e)
+                ProcessingResult.Error("Connection failed: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * `GET /api/v1/attachments/limits`：上限与允许类型由服务器给，客户端不写死。
+     * 拿不到时返回 [AttachmentLimits.fallback]（1 MB + 契约里的类型清单）。
+     */
+    suspend fun fetchAttachmentLimits(): ProcessingResult<AttachmentLimits> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = createApiService().getAttachmentLimits()
+                if (response.isSuccessful) {
+                    val limits = response.body()?.toDomain() ?: AttachmentLimits.fallback()
+                    Logger.i(
+                        "Attachment limits from server: max=${limits.maxBytes} bytes, " +
+                            "allowed=${limits.allowedMimeTypes}"
+                    )
+                    ProcessingResult.Success(limits)
+                } else {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
+                    Logger.w("Attachment limits unavailable: $errorMsg")
+                    ProcessingResult.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                Logger.w("Attachment limits request failed: ${e.message}")
+                ProcessingResult.Error("Connection failed: ${e.message}")
+            }
+        }
+    }
+
 
     /** Pulls messages from MH (page/per_page are MH's pagination params). */
     suspend fun getMemories(limit: Int = 50, offset: Int = 0): ProcessingResult<List<Memory>> {
@@ -129,7 +232,11 @@ class MessageHubApiClient(
                         ProcessingResult.Error("MH server returned empty body")
                     }
                 } else {
-                    val errorMsg = describeHttpError(response.code(), response.message())
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
                     Logger.e("MH API error: $errorMsg")
                     ProcessingResult.Error("Network error: $errorMsg")
                 }
@@ -153,7 +260,11 @@ class MessageHubApiClient(
                     Logger.i("Server health check passed")
                     ProcessingResult.Success(true)
                 } else {
-                    val errorMsg = describeHttpError(response.code(), response.message())
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
                     Logger.e("Health check failed: $errorMsg")
                     ProcessingResult.Error("Health check failed: $errorMsg")
                 }
@@ -169,38 +280,17 @@ class MessageHubApiClient(
     // ========================================================================
 
     private fun MemoryCreationRequest.toMessageCreateRequest(): MessageCreateRequest {
+        val type = MessageMapper.mapToMessageType(sourceType, metadata)
         return MessageCreateRequest(
             sourceDeviceId = preferences.deviceId,
-            type = MessageMapper.mapToMessageType(sourceType, metadata),
-            sender = MessageMapper.resolveSender(metadata),
+            type = type,
+            // 手动添加的记忆（NOTE/DOCUMENT）sender 用设备名，见 MessageMapper.resolveSenderFor
+            sender = MessageMapper.resolveSenderFor(type, metadata, preferences.manualSender),
             content = content,
-            timestamp = resolveTimestamp(metadata),
+            timestamp = MessageMapper.isoTimestampUtc(metadata["timestamp"]?.toLongOrNull()),
             metadata = metadata // pass through (contains phone/app source info)
         )
     }
-
-    /**
-     * ISO8601 UTC timestamp for the message.
-     * Prefers metadata["timestamp"] (epoch millis, set by the SMS/notification processors,
-     * which is the same event time stored in Memory.createdAt); falls back to now.
-     */
-    private fun resolveTimestamp(metadata: Map<String, String>): String {
-        val epochMillis = metadata["timestamp"]?.toLongOrNull()
-        val instant = if (epochMillis != null) Instant.ofEpochMilli(epochMillis) else Instant.now()
-        return instant.toString() // e.g. 2026-08-31T07:00:00Z
-    }
-
-    /**
-     * 把 HTTP 状态码解释成人能读懂的话。
-     * 3xx 需要特别说明：那通常意味着 Server URL 漏了 https，而重定向会把 POST 变成 GET。
-     */
-    private fun describeHttpError(code: Int, message: String?): String =
-        if (code in 300..399) {
-            "HTTP $code: 服务器要求跳转（通常是 Server URL 少了 https://）——" +
-                "重定向会把 POST 降级成 GET，消息会静默丢失"
-        } else {
-            "HTTP $code: $message"
-        }
 
     private fun String.ensureTrailingSlash(): String {
         return if (this.endsWith("/")) this else "$this/"

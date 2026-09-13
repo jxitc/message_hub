@@ -1,6 +1,9 @@
 package com.jxitc.messagehub.di
 
 import android.content.Context
+import com.jxitc.messagehub.data.attachment.AndroidImageEncoder
+import com.jxitc.messagehub.data.attachment.AttachmentPreparer
+import com.jxitc.messagehub.data.attachment.AttachmentReader
 import com.jxitc.messagehub.data.database.MessageHubDatabase
 import com.jxitc.messagehub.data.repository.MemoryRepositoryImpl
 import com.jxitc.messagehub.domain.repository.MemoryRepository
@@ -44,6 +47,17 @@ class AppContainer(private val context: Context) {
     val createMemoryUseCase by lazy {
         CreateMemoryUseCase(memoryRepository)
     }
+
+    /**
+     * 附件准备：读取 content:// → 校验类型 → 超过上限的图片压缩。
+     * 规则本体在 domain（纯函数、有单测），这里只负责把 Android 实现装起来。
+     */
+    val attachmentPreparer by lazy {
+        AttachmentPreparer(
+            reader = AttachmentReader(context.applicationContext),
+            encoder = AndroidImageEncoder()
+        )
+    }
     
     val getMemoriesUseCase by lazy {
         GetMemoriesUseCase(memoryRepository)
@@ -70,7 +84,13 @@ class AppContainer(private val context: Context) {
     }
 
     fun createAddMemoryViewModel(): AddMemoryViewModel {
-        return AddMemoryViewModel(createMemoryUseCase, apiClient, appPreferences, memoryRepository)
+        return AddMemoryViewModel(
+            createMemoryUseCase,
+            apiClient,
+            appPreferences,
+            memoryRepository,
+            attachmentPreparer
+        )
     }
     
     fun createMemoryListViewModel(): MemoryListViewModel {

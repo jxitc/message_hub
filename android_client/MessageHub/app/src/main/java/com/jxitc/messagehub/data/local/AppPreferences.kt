@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.SharedPreferences
 import android.os.Build
 import android.provider.Settings
+import com.jxitc.messagehub.domain.service.AttachmentPolicy
 import com.jxitc.messagehub.utils.Logger
 
 class AppPreferences(private val context: Context) {
@@ -54,6 +55,18 @@ class AppPreferences(private val context: Context) {
         prefs.edit().putString(KEY_DEVICE_ID, clean).apply()
         Logger.i("Device ID set to: $clean")
     }
+
+    /**
+     * 「手动添加记忆」上传时的 `sender`：**设备名**（`Build.MODEL` 去空格，例如 `PHZ110`）。
+     *
+     * 这是产品决定：手动记录没有"对端"，用用户名或空值都不对；填机身型号让
+     * 服务器/列表一眼看出这条是谁记的。Build.MODEL 取不到时退回用户给手机起的名字。
+     */
+    val manualSender: String
+        get() {
+            val model = Build.MODEL?.takeIf { it.isNotBlank() } ?: systemDeviceName()
+            return AttachmentPolicy.senderFromDeviceModel(model)
+        }
 
     /** 恢复为自动生成的标识（系统设备名/机型 + 短码）。 */
     fun resetDeviceId(): String {
