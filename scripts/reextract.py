@@ -80,6 +80,8 @@ def main():
     group.add_argument('--engines', action='store_true', help='只检查提取工具链')
     group.add_argument('--pending', action='store_true', help='立刻处理队列里等待的')
     group.add_argument('--all', action='store_true', help='重跑所有附件')
+    group.add_argument('--ocr', action='store_true',
+                       help='对所有 PDF 强制走 OCR（文本层太薄、疑似扫描件时用）')
     group.add_argument('--message', help='只重跑这一条消息')
     args = parser.parse_args()
 
@@ -89,7 +91,7 @@ def main():
 
     app = create_app()
     with app.app_context():
-        if args.status or not (args.pending or args.all or args.message):
+        if args.status or not (args.pending or args.all or args.message or args.ocr):
             return report_status()
 
         store = BlobStore()
@@ -111,7 +113,8 @@ def main():
             if reset_status(message) == 0:
                 continue
             db.session.commit()
-            total += extraction.process_message(db.session, store, message)
+            total += extraction.process_message(db.session, store, message,
+                                                force_ocr=args.ocr)
         db.session.commit()
         print('重跑完成，处理 %d 个附件' % total)
     return 0

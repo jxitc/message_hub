@@ -43,9 +43,21 @@ OCR_LANGS = ('eng', 'chi_sim')
 #: worker runs in the background and the UI shows "pending" meanwhile.
 EXTRACT_TIMEOUT = int(os.environ.get('EXTRACT_TIMEOUT') or 120)
 
-#: Text shorter than this from a PDF usually means "no text layer" (a scan), which
-#: is what triggers the OCR fallback.
-PDF_TEXT_MIN_CHARS = 20
+#: How little text still counts as "this PDF has a text layer".
+#:
+#: There is no threshold that separates "short real text layer" from "scan with an
+#: incidental watermark", so this deliberately errs towards *using* the text layer:
+#:
+#:   * Too high a bar wastes real work — an 18-character one-page PDF fell under a
+#:     20-char rule and was needlessly rendered and OCR'd (tens of seconds on a
+#:     1-vCPU box) even though pdftotext had already answered.
+#:   * The case it would protect against (a scan whose only text is a header) is
+#:     rare, obvious in the output (`chars` and `chars_per_page` are recorded), and
+#:     recoverable — the original PDF is kept, and scripts/reextract.py --ocr redoes
+#:     it with OCR on demand.
+#:
+#: So: any text layer above a small floor is used; below it we assume a scan.
+PDF_TEXT_FLOOR_CHARS = 10
 
 #: Refuse to OCR absurdly long documents on a 1-vCPU droplet. Above this we mark
 #: the extraction as `partial` and say so, instead of occupying the worker for
@@ -91,6 +103,16 @@ def _ocr_language_arg():
     return '+'.join(langs) if langs else 'eng'
 
 
+def count_pages(text):
+    """pdftotext separates pages with a form feed, so pages = form feeds + 1."""
+    return text.count('\f') + 1
+
+
+def pdf_text_is_usable(text):
+    """Is there a text layer worth using, or is this a scan? (pure, unit-tested)"""
+    return len((text or '').strip()) >= PDF_TEXT_FLOOR_CHARS
+
+
 def extract_pdf(path):
     """Text from a PDF: text layer first, OCR fallback for scans."""
     if not shutil.which('pdftotext'):
@@ -98,9 +120,15 @@ def extract_pdf(path):
                 'error': '服务器未安装 poppler-utils（pdftotext）'}
 
     code, out, err = _run(['pdftotext', '-layout', path, '-'])
-    text = out.decode('utf-8', 'replace').strip() if code == 0 else ''
-    if len(text) >= PDF_TEXT_MIN_CHARS:
-        return {'status': 'done', 'engine': 'pdftotext', 'text': text}
+    raw_text = out.decode('utf-8', 'replace') if code == 0 else ''
+    if pdf_text_is_usable(raw_text):
+        pages = count_pages(raw_text)
+        stripped = raw_text.strip()
+        return {'status': 'done', 'engine': 'pdftotext', 'text': stripped,
+                'pages': pages,
+                # Exposed so a thin text layer over many pages is visible rather
+                # than silently accepted as the document's whole content.
+                'chars_per_page': round(len(stripped) / max(pages, 1), 1)}
 
     # No usable text layer → this is very likely a scan. Rasterise and OCR it.
     if not (shutil.which('pdftoppm') and shutil.which('tesseract')):
@@ -172,13 +200,28 @@ def extract_text_file(path):
     return {'status': 'failed', 'engine': 'plain', 'error': '无法解码文本'}
 
 
-def extract(store, key, mime, kind):
-    """Extract text for one stored blob. Returns a dict describing the outcome."""
+def extract(store, key, mime, kind, force_ocr=False):
+    """Extract text for one stored blob. Returns a dict describing the outcome.
+
+    `force_ocr=True` skips the PDF text layer and goes straight to OCR — the escape
+    hatch for a scanned PDF that carries just enough incidental text to look like it
+    has a layer (see PDF_TEXT_FLOOR_CHARS).
+    """
     path = store.path(key)
     if not os.path.exists(path):
         return {'status': 'failed', 'error': 'blob 文件不存在：%s' % key}
     if kind == 'pdf' or mime == 'application/pdf':
-        result = extract_pdf(path)
+        if force_ocr and shutil.which('pdftoppm') and shutil.which('tesseract'):
+            ocr_text, pages = _ocr_pdf_pages(path)
+            if ocr_text.strip():
+                result = {'status': 'done', 'engine': 'pdftoppm+tesseract',
+                          'text': ocr_text.strip(), 'pages': pages,
+                          'note': '按要求强制 OCR'}
+            else:
+                result = {'status': 'empty', 'engine': 'pdftoppm+tesseract',
+                          'text': '', 'pages': pages, 'error': 'OCR 没识别出文字'}
+        else:
+            result = extract_pdf(path)
     elif kind == 'image':
         result = extract_image(path)
     elif kind == 'text':
@@ -278,7 +321,7 @@ def _message_model():
     return Message
 
 
-def process_message(session, store, message):
+def process_message(session, store, message, force_ocr=False):
     """Extract every pending attachment of one message. Returns count processed."""
     metadata = dict(message.message_metadata or {})
     attachments = list(metadata.get('attachments') or [])
@@ -294,7 +337,7 @@ def process_message(session, store, message):
             processed += 1
             continue
         result = extract(store, key, attachment.get('mime') or '',
-                         attachment.get('kind') or 'file')
+                         attachment.get('kind') or 'file', force_ocr=force_ocr)
         apply_result(message, index, result)
         session.commit()
         processed += 1

@@ -520,3 +520,41 @@ def test_blob_url_stays_relative_without_a_blob_host(client, auth_headers, store
     r = upload(client, auth_headers, [('shot.png', PNG_1PX, 'image/png')], content='x')
     attachment = r.get_json()['attachments'][0]
     assert attachment['url'] == '/api/v1/blobs/%s' % attachment['key']
+
+
+# ---------------------------------------------------------------------------
+# The PDF "is this a scan?" heuristic
+# ---------------------------------------------------------------------------
+
+def test_short_but_real_text_layer_is_usable():
+    """Regression: an 18-char text layer on one page used to fall under an absolute
+    20-char bar and get rendered + OCR'd for nothing."""
+    assert extraction.pdf_text_is_usable('MH ACCEPTANCE 2026') is True
+
+
+def test_watermark_only_text_is_not_usable():
+    """Below the floor we assume a scan rather than store a stray watermark."""
+    assert extraction.pdf_text_is_usable('Page 1') is False
+    assert extraction.pdf_text_is_usable('DRAFT') is False
+
+
+def test_thin_layer_over_many_pages_is_still_reported_usable():
+    """A header-only scan is the deliberate cost of the floor: the text is used, but
+    chars_per_page is recorded so it is visible, and --ocr redoes it on demand."""
+    scan = 'Page 1 of 5\n\x0cPage 2 of 5\n\x0cPage 3 of 5\n\x0cPage 4 of 5\n\x0cPage 5 of 5'
+    assert extraction.pdf_text_is_usable(scan) is True
+    assert extraction.count_pages(scan) == 5
+
+
+def test_realistic_invoice_text_layer_is_usable():
+    assert extraction.pdf_text_is_usable('Invoice INV-830425\nTotal 42.00\n' * 5) is True
+
+
+def test_empty_pdf_text_is_not_usable():
+    assert extraction.pdf_text_is_usable('') is False
+    assert extraction.pdf_text_is_usable('   \n\f  \n') is False
+
+
+def test_count_pages_uses_form_feeds():
+    assert extraction.count_pages('one page') == 1
+    assert extraction.count_pages('p1\fp2\fp3') == 3

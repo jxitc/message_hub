@@ -83,6 +83,16 @@ removed = store.collect_garbage(referenced_keys, dry_run=False)
 |---|---|---|
 | PDF | `pdftotext`（poppler） | 有文本层直接取 |
 | 扫描版 PDF | `pdftoppm` + `tesseract` | 无文本层时自动回退，最多 OCR 10 页 |
+
+**"这算有文本层还是扫描件"怎么判**（`PDF_TEXT_FLOOR_CHARS`）：**只要文本层超过很小的下限就用它**，
+低于下限才当作扫描件走 OCR。没有哪个阈值能真正区分"很短的正文"和"扫描件上的水印"，所以这条
+有意偏向**少做无用功**：
+
+- 阈值定高了会白干活——实测一个 18 字文本层的单页 PDF 落在"20 字"线下，被**白白渲染+OCR**
+  （1 核机器上几十秒），而 `pdftotext` 早就给出答案了；
+- 它本要防的情况（扫描件的文本层只有页眉）很少见，而且在输出里**看得见**
+  （`extraction.chars` 与 `chars_per_page` 都记录），更可以随时重跑纠正——
+  原件一直留着，`scripts/reextract.py --ocr` 就是那个手动杠杆。
 | 图片 | `tesseract -l eng+chi_sim` | 中英文都装 |
 | 纯文本 | 直接解码 | 依次尝试 utf-8 / gb18030 / latin-1 |
 
@@ -102,6 +112,7 @@ removed = store.collect_garbage(referenced_keys, dry_run=False)
 ./venv/bin/python scripts/reextract.py --pending     # 立刻清空队列
 ./venv/bin/python scripts/reextract.py --all         # 全部重跑
 ./venv/bin/python scripts/reextract.py --engines     # 工具链在不在
+./venv/bin/python scripts/reextract.py --ocr --all   # 强制走 OCR（文本层太薄、疑似扫描件）
 ```
 
 ## 邮件侧
@@ -164,9 +175,22 @@ removed = store.collect_garbage(referenced_keys, dry_run=False)
   做法是**临时把该 DNS 记录切为 DNS-only（灰云）→ 跑 certbot → 再切回代理**。
 - 密钥、签名 token 都不入库；token 用 `SECRET_KEY` 做 HMAC，自带过期。
 
+## 验收脚本（验证**已部署**的系统）
+
+单元测试跑的是内存里的 Flask 客户端，验不了 nginx 的体积上限、Cloudflare 的证书与代理、
+独立源路由、gunicorn 超时、以及服务器上到底有没有 OCR 工具链。这些只有打真实域名才看得出来：
+
+```bash
+./scripts/acceptance-attachments.sh          # 23 项，自带素材与清理
+```
+
+素材是**真的**：PDF 是脚本里用纯 Python 手搓的（带正确 xref 的文本层），图片用 PIL 画字
+（没装 PIL 就退化成白图并降低断言强度）。用 1x1 空白图是证明不了 OCR 的——那正是上一版脚本
+犯的错。
+
 ## 验证记录（2026-09-13）
 
-- 单测 88 例（`tests/test_attachments.py` 覆盖嗅探/白名单/去重/GC/上传校验/下载鉴权/
+- 单测 94 例（`tests/test_attachments.py` 覆盖嗅探/白名单/去重/GC/上传校验/下载鉴权/
   签名与过期/提取文本落位/独立源 URL 切换），全过。
 - 线上端到端（真实文件）：
   - 42KB PNG → `tesseract` OCR → `content` = `MH OCR TEST 12345\nsecond line here`；
