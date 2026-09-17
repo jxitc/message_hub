@@ -675,3 +675,102 @@ def test_json_is_not_ascii_escaped(app):
         payload = jsonify({'content': '中文测试'}).get_data(as_text=True)
     assert '中文测试' in payload
     assert '\\u4e2d' not in payload
+
+
+# ---------------------------------------------------------------------------
+# Web "add" page — same rules as the API, because it shares message_ingest
+# ---------------------------------------------------------------------------
+
+def test_web_add_page_renders(client):
+    page = client.get('/messages/new')
+    assert page.status_code == 200
+    body = page.get_data(as_text=True)
+    assert '添加' in body
+    assert '选图片' in body and '选文件' in body
+    assert '1048576' in body or '1024 KB' in body      # the limit is published to the page
+
+
+def test_web_add_creates_a_text_note(client):
+    from models import db, Message
+    r = client.post('/messages/new', data={
+        'content': '从网页记一笔', 'sender': 'web', 'type': 'NOTE'}, follow_redirects=False)
+    assert r.status_code == 302
+    with client.application.app_context():
+        message = db.session.query(Message).order_by(Message.received_at.desc()).first()
+        assert message.content == '从网页记一笔'
+        assert message.source_device_id == 'web'
+        assert message.type == 'NOTE'
+
+
+def test_web_add_with_an_image_stores_the_blob(client, store):
+    import io
+    from models import db, Message
+    r = client.post('/messages/new', data={
+        'content': '', 'sender': 'web', 'type': 'NOTE',
+        'attachments': (io.BytesIO(PNG_1PX), 'shot.png'),
+    }, content_type='multipart/form-data', follow_redirects=False)
+    assert r.status_code == 302
+    with client.application.app_context():
+        message = db.session.query(Message).order_by(Message.received_at.desc()).first()
+        attachments = message.message_metadata['attachments']
+        assert len(attachments) == 1
+        assert attachments[0]['extraction']['status'] == 'pending'
+        assert store.exists(attachments[0]['key'])
+
+
+def test_web_add_records_source_url_and_title(client):
+    from models import db, Message
+    client.post('/messages/new', data={
+        'content': '摘录', 'sender': 'web', 'type': 'NOTE',
+        'source_url': 'https://example.com/a', 'title': '示例标题'})
+    with client.application.app_context():
+        message = db.session.query(Message).order_by(Message.received_at.desc()).first()
+        assert message.message_metadata['url'] == 'https://example.com/a'
+        assert message.message_metadata['title'] == '示例标题'
+
+
+def test_web_add_refuses_an_empty_submission(client):
+    r = client.post('/messages/new', data={'content': '', 'sender': 'web', 'type': 'NOTE'},
+                    follow_redirects=True)
+    assert 'content 不能为空' in r.get_data(as_text=True)
+
+
+def test_web_add_refuses_a_binary_file_and_keeps_the_typed_text(client):
+    import io
+    r = client.post('/messages/new', data={
+        'content': '我写的字还在吗', 'sender': 'web', 'type': 'NOTE',
+        'attachments': (io.BytesIO(b'\x7fELF\x02\x01\x01\x00\x00'), 'evil.bin'),
+    }, content_type='multipart/form-data', follow_redirects=True)
+    body = r.get_data(as_text=True)
+    assert '不支持' in body
+    assert '我写的字还在吗' in body        # the page re-renders with the text preserved
+
+
+def test_web_add_rejects_an_over_quota_file(client):
+    import io
+    big = PNG_1PX + b'\x00' * blob_store.MAX_ATTACHMENT_BYTES
+    r = client.post('/messages/new', data={
+        'content': 'x', 'sender': 'web', 'type': 'NOTE',
+        'attachments': (io.BytesIO(big), 'big.png'),
+    }, content_type='multipart/form-data', follow_redirects=True)
+    assert '太大' in r.get_data(as_text=True)
+
+
+def test_ingest_accepts_a_datetime_object_for_timestamp():
+    """Regression: marshmallow's DateTime only parses strings, so the web form's
+    `datetime.now(...)` blew up with "Not a valid datetime" — a confusing error for
+    a perfectly correct value. The shared ingest normalises it."""
+    import message_ingest
+    from models import db, Message
+    from app import create_app
+
+    app = create_app()
+    with app.app_context():
+        db.create_all()
+        message, attachments, rejected = message_ingest.create_message({
+            'source_device_id': 'web', 'type': 'NOTE', 'sender': 'web',
+            'content': '带 datetime 的调用方', 'timestamp': __import__('datetime').datetime.now(
+                __import__('datetime').timezone.utc)}, [], source='test')
+        db.session.commit()
+        assert message.timestamp is not None
+        assert message.source_device_id == 'web'

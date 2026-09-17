@@ -8,6 +8,7 @@ import message_filters as _mf
 import metadata_policy as _policy
 from blob_store import BlobError, MAX_ATTACHMENT_BYTES
 from .blobs import attachment_public as _attachment_public
+import message_ingest as _ingest
 
 message_create_schema = MessageCreateSchema()
 message_response_schema = MessageResponseSchema()
@@ -95,55 +96,11 @@ def create_message():
         if not json_data:
             return jsonify({'error': 'No JSON data provided'}), 400
 
-        attachments, rejected = [], []
-        if files:
-            from .blobs import store_uploads
-            attachments, rejected = store_uploads(files)
-            if not attachments:
-                return jsonify({
-                    'error': (rejected[0]['error'] if rejected
-                              else '附件均未通过校验'),
-                    'rejected': rejected,
-                }), 415
-
-        has_text = bool((json_data.get('content') or '').strip())
-        if not has_text and not attachments:
-            # The one invariant the schema cannot express cleanly.
-            return jsonify({'error': 'content 不能为空（除非同时上传了附件）'}), 400
-        json_data.setdefault('content', '')
-
-        # Validate against schema
-        data = message_create_schema.load(json_data)
-
-        metadata = data.get('metadata', {}) or {}
-        if attachments:
-            metadata['attachments'] = attachments
-
-        # Create new message
-        message = Message(
-            source_device_id=data['source_device_id'],
-            type=data['type'],
-            sender=data['sender'],
-            content=data['content'],
-            timestamp=data['timestamp'],
-            message_metadata=metadata,
-            received_at=datetime.now(timezone.utc)
-        )
-        
-        # metadata JSON is the default place for anything channel-specific
-        # (see metadata_policy.py), with one exception: a fact that already
-        # lives in a column must not be copied in. Report (never reject) so
-        # client drift is visible in logs instead of silently creating a
-        # second source of truth.
-        issues = _policy.lint_metadata(data['type'], message.message_metadata)
-        for issue in issues:
-            current_app.logger.warning(
-                'metadata contract: %s (device=%s, type=%s)',
-                issue, data['source_device_id'], data['type'])
-        
-        db.session.add(message)
+        # One shared implementation with the web "add" page — see message_ingest.
+        message, attachments, rejected = _ingest.create_message(
+            json_data, files, source='api')
         db.session.commit()
-        
+
         payload = {
             'message': 'Message created successfully',
             'id': message.id,

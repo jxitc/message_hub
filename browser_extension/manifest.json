@@ -1,0 +1,30 @@
+{
+  "manifest_version": 3,
+  "name": "Message Hub — 划选入库",
+  "version": "1.0.0",
+  "description": "把网页上选中的文字（或一张图片）一键存进自建的 Message Hub。",
+  "permissions": [
+    "contextMenus",
+    "storage",
+    "notifications",
+    "activeTab"
+  ],
+  "optional_host_permissions": [
+    "*://*/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "options_page": "options.html",
+  "action": {
+    "default_title": "Message Hub",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "128": "icon128.png"
+    }
+  },
+  "icons": {
+    "128": "icon128.png"
+  }
+}

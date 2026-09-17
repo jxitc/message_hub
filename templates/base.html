@@ -40,6 +40,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link{% if request.endpoint == 'web.message_new' %} active{% endif %}"
+                           href="{{ url_for('web.message_new') }}">
+                            <i class="bi bi-plus-square"></i> 添加
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link{% if request.endpoint == 'web.status' %} active{% endif %}" 
                            href="{{ url_for('web.status') }}">
                             <i class="bi bi-activity"></i> Status

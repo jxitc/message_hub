@@ -1,6 +1,8 @@
 from flask import render_template, request, jsonify, flash, redirect, url_for, current_app
 from sqlalchemy import desc, func
 from datetime import datetime, timezone, timedelta
+from marshmallow import ValidationError
+
 from models import db, Message, Device
 from . import web
 import requests
@@ -347,6 +349,67 @@ def _attachment_context(message_id, index):
     previous = index - 1 if index > 0 else None
     following = index + 1 if index + 1 < len(attachments) else None
     return message, attachments[index], previous, following, None
+
+
+@web.route('/messages/new', methods=['GET', 'POST'])
+def message_new():
+    """Web "add" page: text, screenshots and files, same rules as the phone.
+
+    Reuses `message_ingest.create_message`, which the REST API also uses, so the
+    limits, the type whitelist and the "content may be empty only with an
+    attachment" invariant cannot drift between the browser and the phone.
+    """
+    from blob_store import MAX_ATTACHMENT_BYTES, BlobError
+    from api.v1.blobs import ALLOWED_MIME
+    from message_ingest import source_device_for_web
+    from api.v1.messages import MAX_FILES_PER_REQUEST
+
+    default_sender = 'web'
+    context = {
+        'max_bytes': MAX_ATTACHMENT_BYTES,
+        'max_files': MAX_FILES_PER_REQUEST,
+        'allowed': list(ALLOWED_MIME),
+        'default_sender': default_sender,
+        'form': {},
+    }
+
+    if request.method == 'GET':
+        return render_template('message_new.html', **context)
+
+    form = {
+        'content': (request.form.get('content') or '').strip(),
+        'sender': (request.form.get('sender') or default_sender).strip(),
+        'source_url': (request.form.get('source_url') or '').strip(),
+        'title': (request.form.get('title') or '').strip(),
+        'type': (request.form.get('type') or 'NOTE').strip(),
+    }
+    context['form'] = form
+
+    metadata = {}
+    if form['source_url']:
+        metadata['url'] = form['source_url']
+    if form['title']:
+        metadata['title'] = form['title']
+
+    try:
+        import message_ingest
+        message, attachments, rejected = message_ingest.create_message({
+            'source_device_id': source_device_for_web(),
+            'type': form['type'],
+            'sender': form['sender'] or default_sender,
+            'content': form['content'],
+            'timestamp': datetime.now(timezone.utc),
+            'metadata': metadata,
+        }, request.files.getlist('attachments'), source='web')
+        db.session.commit()
+    except (BlobError, ValidationError) as exc:
+        detail = getattr(exc, 'message', None) or str(exc)
+        flash(detail, 'error')
+        return render_template('message_new.html', **context)
+
+    flash('已保存%s。附件提取在后台进行，稍后刷新详情页即可看到文字。'
+          % ('（%d 个附件）' % len(attachments) if attachments else ''), 'success')
+    return redirect(url_for('web.message_detail', message_id=message.id))
 
 
 @web.route('/messages/<message_id>/attachments/<int:index>')

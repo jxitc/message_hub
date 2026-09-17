@@ -1,0 +1,250 @@
+{% extends "base.html" %}
+
+{% block title %}添加 - Message Hub{% endblock %}
+
+{% block content %}
+{#
+  网页版「手动添加」：与手机端同一套规则（同样的 1MB 上限、同样的类型白名单、
+  同样的"有附件时正文可为空"），因为校验走的是同一个 message_ingest。
+
+  浏览器侧的图片压缩与手机端参数一致（长边 2048 + JPEG q80→q50），
+  小于上限的图片原样上传、不重新编码。
+#}
+<div class="row mb-3">
+    <div class="col-12 d-flex justify-content-between align-items-center">
+        <div>
+            <h1 class="h4 mb-1"><i class="bi bi-plus-square"></i> 添加</h1>
+            <p class="text-muted small mb-0">
+                文字 / 截图 / 文件都可以。图片超过 {{ (max_bytes // 1024) }} KB 会在浏览器里自动压缩；
+                其他类型超限会被拒绝（PDF 压不了）。
+            </p>
+        </div>
+        <a class="btn btn-outline-secondary" href="{{ url_for('web.messages') }}">
+            <i class="bi bi-list-ul"></i> 返回列表
+        </a>
+    </div>
+</div>
+
+<form id="add-form" method="POST" action="{{ url_for('web.message_new') }}" enctype="multipart/form-data">
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-pencil"></i> 内容</div>
+                <div class="card-body">
+                    <textarea class="form-control" name="content" id="content" rows="8"
+                              placeholder="想记的东西……&#10;&#10;也可以直接：&#10;· 拖文件进来&#10;· 或者 Ctrl/⌘+V 粘贴一张截图">{{ form.content or '' }}</textarea>
+                    <div class="form-text mt-2">
+                        正文可以为空——只要下面有附件（提取出来的文字会写进正文）。
+                    </div>
+                </div>
+            </div>
+
+            <div class="card" id="drop-card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span><i class="bi bi-paperclip"></i> 附件</span>
+                    <span class="small text-muted" id="limit-hint">{{ (max_bytes // 1024) }} KB / 个，最多 {{ max_files }} 个</span>
+                </div>
+                <div class="card-body">
+                    <div id="drop-zone" class="text-center p-4 mh-panel rounded" style="border:1px dashed var(--bs-border-color);">
+                        <i class="bi bi-cloud-arrow-up fs-3 d-block mb-2"></i>
+                        <div class="mb-2">把文件拖到这里，或</div>
+                        <div class="d-flex gap-2 justify-content-center">
+                            <label class="btn btn-sm btn-outline-primary mb-0">
+                                <i class="bi bi-image"></i> 选图片
+                                <input type="file" id="pick-image" accept="image/*" multiple hidden>
+                            </label>
+                            <label class="btn btn-sm btn-outline-secondary mb-0">
+                                <i class="bi bi-file-earmark"></i> 选文件
+                                <input type="file" id="pick-file" accept="application/pdf,text/plain,image/*" multiple hidden>
+                            </label>
+                        </div>
+                        <div class="form-text mt-2">也可以直接 Ctrl/⌘+V 粘贴截图</div>
+                    </div>
+
+                    <!-- 真正提交的文件输入（由 JS 用处理后的文件填充） -->
+                    <input type="file" name="attachments" id="real-input" multiple hidden>
+
+                    <div id="file-list" class="mt-3"></div>
+                    <div id="work-status" class="form-text mt-2"></div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-sliders"></i> 属性</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label" for="type">类型</label>
+                        <select class="form-select" name="type" id="type">
+                            <option value="NOTE" {% if (form.type or 'NOTE') == 'NOTE' %}selected{% endif %}>NOTE — 手动记录（文字 / 图片）</option>
+                            <option value="DOCUMENT" {% if form.type == 'DOCUMENT' %}selected{% endif %}>DOCUMENT — 上传的文件</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="sender">来源标记（sender）</label>
+                        <input class="form-control" name="sender" id="sender"
+                               value="{{ form.sender or default_sender }}">
+                        <div class="form-text">
+                            手机端用的是设备名（如 PHZ110）。这里默认 <code>{{ default_sender }}</code>，
+                            改成别的可以区分"哪台机器记的"。
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label" for="source_url">来源链接（可选）</label>
+                        <input class="form-control" name="source_url" id="source_url"
+                               value="{{ form.source_url or '' }}" placeholder="https://…">
+                        <div class="form-text">从网页摘来的东西记这里，以后能回溯。</div>
+                    </div>
+                    <div class="mb-1">
+                        <label class="form-label" for="title">标题（可选）</label>
+                        <input class="form-control" name="title" id="title" value="{{ form.title or '' }}">
+                    </div>
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary w-100" id="submit-btn">
+                <i class="bi bi-send"></i> 保存
+            </button>
+            <div class="form-text mt-2">
+                保存后跳到消息详情页，附件提取（OCR / PDF）在后台进行，稍后刷新即可看到文字。
+            </div>
+        </div>
+    </div>
+</form>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+// 与手机端一致的压缩参数：长边 2048，JPEG q80 → q50，≤ 上限就原样上传。
+const MAX_BYTES = {{ max_bytes }};
+const MAX_FILES = {{ max_files }};
+const MAX_EDGE = 2048;
+const QUALITIES = [0.8, 0.7, 0.6, 0.5];
+// 与服务器 api/v1/blobs.ALLOWED_MIME 一致（服务器按内容嗅探，这里只是提前拦）
+const ALLOWED = {{ allowed|tojson }};
+
+let files = [];           // { file: File, status: 'ok'|'rejected', note: string }
+let busy = false;
+
+const $ = (id) => document.getElementById(id);
+const fmt = (n) => n < 1024 ? n + ' B' : (n < 1048576 ? (n/1024).toFixed(1) + ' KB' : (n/1048576).toFixed(2) + ' MB');
+
+function render() {
+    $('file-list').innerHTML = files.map((entry, i) => {
+        const f = entry.file;
+        const bad = entry.status === 'rejected';
+        return `<div class="d-flex justify-content-between align-items-center mb-1 p-2 rounded ${bad ? 'bg-danger-subtle' : 'mh-panel'}">
+            <span class="text-truncate">
+                <i class="bi ${bad ? 'bi-x-circle text-danger' : (f.type.startsWith('image/') ? 'bi-image' : 'bi-file-earmark')}"></i>
+                ${f.name || '(粘贴的图片)'}
+                <span class="text-muted small ms-1">${fmt(f.size)}</span>
+                ${entry.note ? `<span class="small ms-2 ${bad ? 'text-danger' : 'text-muted'}">${entry.note}</span>` : ''}
+            </span>
+            <button type="button" class="btn btn-sm btn-outline-secondary" data-remove="${i}">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>`;
+    }).join('');
+    $('file-list').querySelectorAll('[data-remove]').forEach(btn => {
+        btn.addEventListener('click', () => {
+            files.splice(Number(btn.dataset.remove), 1);
+            render(); sync();
+        });
+    });
+    const ok = files.filter(e => e.status === 'ok').length;
+    $('submit-btn').disabled = busy || (!ok && !$('content').value.trim() && !$('title').value.trim());
+    $('work-status').textContent = busy ? '正在压缩…' : (ok ? `${ok} 个附件待上传` : '');
+}
+
+// 压缩后把文件塞回真实的 file input（用 DataTransfer），这样表单照常提交
+function sync() {
+    const dt = new DataTransfer();
+    files.filter(e => e.status === 'ok').forEach(e => dt.items.add(e.file));
+    $('real-input').files = dt.files;
+}
+
+async function compressImage(file) {
+    if (file.size <= MAX_BYTES) return { file, note: '原样上传' };
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(bitmap.width * scale);
+    canvas.height = Math.round(bitmap.height * scale);
+    canvas.getContext('2d').drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close && bitmap.close();
+
+    for (const q of QUALITIES) {
+        const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg', q));
+        if (blob && blob.size <= MAX_BYTES) {
+            const name = (file.name || 'pasted').replace(/\.[^.]+$/, '') + '.jpg';
+            return {
+                file: new File([blob], name, { type: 'image/jpeg' }),
+                note: `已压缩 ${fmt(file.size)} → ${fmt(blob.size)}（q${Math.round(q * 100)}）`
+            };
+        }
+    }
+    return { rejected: true, note: `压缩后仍超过 ${(MAX_BYTES/1024)|0} KB` };
+}
+
+async function addFiles(incoming) {
+    busy = true; render();
+    for (const file of incoming) {
+        if (files.length >= MAX_FILES) {
+            files.push({ file, status: 'rejected', note: `最多 ${MAX_FILES} 个` });
+            continue;
+        }
+        const isImage = file.type.startsWith('image/');
+        if (!isImage && file.size > MAX_BYTES) {
+            files.push({ file, status: 'rejected', note: `超过 ${(MAX_BYTES/1024)|0} KB，且无法压缩` });
+            continue;
+        }
+        if (!isImage && !ALLOWED.includes(file.type)) {
+            // 浏览器给的 type 可能为空，交给服务器按内容判定；这里只拦明确不支持的
+            if (file.type) { files.push({ file, status: 'rejected', note: '类型不支持' }); continue; }
+        }
+        try {
+            const out = isImage ? await compressImage(file) : { file, note: '' };
+            if (out.rejected) files.push({ file, status: 'rejected', note: out.note });
+            else files.push({ file: out.file, status: 'ok', note: out.note });
+        } catch (err) {
+            files.push({ file, status: 'rejected', note: '无法读取：' + err });
+        }
+        render();
+    }
+    busy = false; render(); sync();
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    $('pick-image').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+    $('pick-file').addEventListener('change', e => { addFiles(e.target.files); e.target.value = ''; });
+    $('content').addEventListener('input', render);
+
+    // 拖放
+    const zone = $('drop-zone');
+    ['dragenter', 'dragover'].forEach(ev => zone.addEventListener(ev, e => {
+        e.preventDefault(); zone.classList.add('border-primary');
+    }));
+    ['dragleave', 'drop'].forEach(ev => zone.addEventListener(ev, e => {
+        e.preventDefault(); zone.classList.remove('border-primary');
+    }));
+    zone.addEventListener('drop', e => addFiles(e.dataTransfer.files));
+
+    // 粘贴截图
+    document.addEventListener('paste', e => {
+        const items = Array.from(e.clipboardData?.items || []);
+        const blobs = items.filter(i => i.kind === 'file').map(i => i.getAsFile()).filter(Boolean);
+        if (blobs.length) { e.preventDefault(); addFiles(blobs); }
+    });
+
+    $('add-form').addEventListener('submit', e => {
+        if (busy) { e.preventDefault(); alert('还在压缩，稍等一下'); return; }
+        if (!files.some(f => f.status === 'ok') && !$('content').value.trim()) {
+            e.preventDefault(); alert('至少写点文字，或者加一个附件');
+        }
+    });
+
+    render();
+});
+</script>
+{% endblock %}

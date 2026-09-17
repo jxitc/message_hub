@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="utf-8">
+    <title>Message Hub 设置</title>
+    <style>
+        body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; margin: 24px; max-width: 620px; color: #222; }
+        h1 { font-size: 18px; margin: 0 0 4px; }
+        p.hint { color: #666; font-size: 13px; margin: 0 0 20px; }
+        label { display: block; font-weight: 600; font-size: 13px; margin: 14px 0 4px; }
+        input { width: 100%; padding: 8px 10px; font-size: 14px; border: 1px solid #ccc; border-radius: 6px; box-sizing: border-box; }
+        .row { display: flex; gap: 8px; align-items: center; margin-top: 16px; }
+        button { padding: 8px 14px; font-size: 14px; border-radius: 6px; border: 1px solid #ccc; background: #f6f6f6; cursor: pointer; }
+        button.primary { background: #0d6efd; border-color: #0d6efd; color: #fff; }
+        #status { margin-top: 14px; font-size: 13px; white-space: pre-wrap; }
+        .ok { color: #198754; }
+        .bad { color: #dc3545; }
+        .warn { color: #b8860b; }
+        code { background: #f2f2f2; padding: 1px 4px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>Message Hub — 划选入库</h1>
+    <p class="hint">配置只存在本机浏览器里（<code>chrome.storage.local</code>，不参与账号同步）。</p>
+
+    <label for="serverUrl">服务器地址</label>
+    <input id="serverUrl" placeholder="https://mh.jxitc.com" autocomplete="off">
+
+    <label for="apiKey">API key</label>
+    <input id="apiKey" type="password" placeholder="mhk_…" autocomplete="off">
+    <p class="hint">
+        ⚠️ 请在网页版 <code>设置 → API Keys</code> 里**单独生成一个**给插件用的 key，不要复用手机那个。
+        现在的 key 没有权限分级，等于整个 hub 的读写权；单独一个的好处是**随时能单独吊销**，
+        而且不会牵连手机。
+    </p>
+
+    <label for="deviceId">设备标识（source_device_id）</label>
+    <input id="deviceId" placeholder="browser-extension" autocomplete="off">
+
+    <div class="row">
+        <button class="primary" id="save">保存并授权该域名</button>
+        <button id="test">测试连接</button>
+    </div>
+    <div id="status"></div>
+
+    <script src="options.js"></script>
+</body>
+</html>

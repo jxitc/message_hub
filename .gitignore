@@ -158,5 +158,8 @@ logs/
 # ---- Android launcher icons (re-include under the generic *.png rule) ----
 !android_client/MessageHub/app/src/main/res/mipmap-*/ic_launcher.png
 !android_client/MessageHub/app/src/main/res/mipmap-*/ic_launcher_round.png
+
+# ---- Browser extension icon (same re-include rationale as the Android icons) ----
+!browser_extension/icon128.png
 !android_client/MessageHub/art/
 !android_client/MessageHub/art/**
