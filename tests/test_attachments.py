@@ -19,14 +19,6 @@ MINIMAL_PDF = (b'%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>
                b'%%EOF\n')
 
 
-@pytest.fixture
-def store(tmp_path, monkeypatch):
-    """Point blob storage at a throwaway directory for the whole test."""
-    root = tmp_path / 'blobs'
-    monkeypatch.setenv('BLOB_ROOT', str(root))
-    return BlobStore(str(root))
-
-
 # ---------------------------------------------------------------------------
 # Sniffing / validation
 # ---------------------------------------------------------------------------

@@ -70,6 +70,19 @@ def app():
 
 
 @pytest.fixture
+def store(tmp_path, monkeypatch):
+    """Point blob storage at a throwaway directory.
+
+    Shared: several test modules import attachments, and they all need the same
+    guarantee that nothing is written outside tmp_path.
+    """
+    from blob_store import BlobStore
+    root = tmp_path / 'blobs'
+    monkeypatch.setenv('BLOB_ROOT', str(root))
+    return BlobStore(str(root))
+
+
+@pytest.fixture
 def client(app):
     return app.test_client()
 
