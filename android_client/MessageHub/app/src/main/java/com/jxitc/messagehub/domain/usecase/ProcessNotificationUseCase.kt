@@ -72,11 +72,16 @@ class ProcessNotificationUseCase(
                 is ProcessingResult.Success -> {
                     Logger.d("ProcessNotificationUseCase", "Notification processed successfully, memory ID: ${result.data.id}")
 
-                    // Trigger auto-sync in background after successful save
+                    // Trigger auto-sync in background after successful save.
+                    //
+                    // 只上传刚存下的这一条，**不要** syncPendingMemories()：那是全量
+                    // 扫描，而这里每条通知都会调一次。2026-09-20 的 15,745 条重复就是
+                    // 这么来的 —— 一次通知风暴里 56 个通知各起一个全量扫描，都从队头
+                    // 走一遍，每条再重试 5 次（56×5=280，实测 281）。
                     syncScope.launch {
                         try {
                             Logger.d("ProcessNotificationUseCase", "Triggering auto-sync for notification memory ${result.data.id}")
-                            syncService.syncPendingMemories()
+                            syncService.syncMemory(result.data.id)
                         } catch (e: Exception) {
                             Logger.e("ProcessNotificationUseCase", "Auto-sync failed, will retry later", e)
                             // Don't fail the notification processing if sync fails

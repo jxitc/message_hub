@@ -10,6 +10,7 @@ import com.jxitc.messagehub.data.attachment.AttachmentPreparer
 import com.jxitc.messagehub.data.attachment.AttachmentReader
 import com.jxitc.messagehub.data.database.MessageHubDatabase
 import com.jxitc.messagehub.data.repository.MemoryRepositoryImpl
+import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.domain.usecase.CreateMemoryUseCase
 import com.jxitc.messagehub.domain.usecase.GetMemoriesUseCase
@@ -24,6 +25,7 @@ import com.jxitc.messagehub.data.remote.UpdateChecker
 import com.jxitc.messagehub.presentation.viewmodel.AddMemoryViewModel
 import com.jxitc.messagehub.presentation.viewmodel.MemoryListViewModel
 import com.jxitc.messagehub.presentation.viewmodel.SettingsViewModel
+import kotlinx.coroutines.flow.first
 
 class AppContainer(private val context: Context) {
     
@@ -103,7 +105,21 @@ class AppContainer(private val context: Context) {
     }
     
     val syncService by lazy {
-        MemorySyncService(memoryRepository, apiClient, appPreferences)
+        // 组合根：把真实的仓库/网络/设置包成 MemorySyncService 要的函数。
+        // 服务本身只依赖函数类型，所以它的并发规则（串行上传 + 不叠加全量扫描）
+        // 能在 JVM 单测里用假的实现跑，见 MemorySyncServiceConcurrencyTest。
+        MemorySyncService(
+            loadPending = { memoryRepository.getPendingUploads().first() },
+            loadOne = { id -> (memoryRepository.getMemory(id) as? ProcessingResult.Success)?.data },
+            markUploaded = { id, serverId ->
+                memoryRepository.updateMemoryUploadStatus(id, true)
+                serverId?.takeIf { it.isNotBlank() }?.let {
+                    memoryRepository.attachServerMessageId(id, it)
+                }
+            },
+            upload = { request -> apiClient.createMemory(request) },
+            autoSyncEnabled = { appPreferences.autoSync }
+        )
     }
     
     val processSmsUseCase by lazy {

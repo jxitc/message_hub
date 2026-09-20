@@ -64,11 +64,13 @@ class ProcessSmsUseCase(
                 is ProcessingResult.Success -> {
                     Logger.d("ProcessSmsUseCase", "SMS processed successfully, memory ID: ${result.data.id}")
 
-                    // Trigger auto-sync in background after successful save
+                    // Trigger auto-sync in background after successful save.
+                    // 只上传刚存下的这一条，理由见 ProcessNotificationUseCase 里的长注释：
+                    // 每条消息都触发一次全量扫描，就是重复洪水本身。
                     syncScope.launch {
                         try {
                             Logger.d("ProcessSmsUseCase", "Triggering auto-sync for SMS memory ${result.data.id}")
-                            syncService.syncPendingMemories()
+                            syncService.syncMemory(result.data.id)
                         } catch (e: Exception) {
                             Logger.e("ProcessSmsUseCase", "Auto-sync failed, will retry later", e)
                             // Don't fail the SMS processing if sync fails

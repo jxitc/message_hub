@@ -27,6 +27,15 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // JVM 单测里 android.util.Log 默认是个空壳，一调用就抛
+    // "Method i in android.util.Log not mocked"。Logger 每处都在调它，所以任何走
+    // 到 Logger 的逻辑都没法在单测里跑 —— 而"上传是否串行""全量扫描会不会叠加"
+    // 恰恰只有跑起来才看得见（见 MemorySyncServiceConcurrencyTest）。
+    // 让这些桩方法返回默认值，代价是断言不能依赖 Log 的行为，那本来也不该依赖。
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
+
     // Hermetic debug signing: if ANDROID_DEBUG_KEYSTORE points to a keystore,
     // use it instead of the default ~/.android/debug.keystore (needed in
     // sandbox/CI environments that cannot write outside the project).
