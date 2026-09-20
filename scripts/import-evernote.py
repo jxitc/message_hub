@@ -295,7 +295,11 @@ def import_note(note, existing_keys, apply_changes=True):
     # 注意：**不要**在这里自己调 store_attachments —— create_message 内部会调一次，
     # 它用自己新生成的记录覆盖 metadata['attachments']，先前标注的字段会被丢掉
     # （而且白读一遍附件字节）。所以先建消息，再给**真正入库的那组记录**补字段。
-    message, stored, rejected = message_ingest.create_message({
+    #
+    # dedupe=False：笔记的身份由本脚本按导出内容（GUID，缺失时 title+created 的
+    # 哈希）自己算，NOTE 在 message_identity 里本来也没有自然键。显式关掉是为了
+    # 说明"这里不会替你丢东西"，而不是依赖一个碰巧为 None 的返回值。
+    result = message_ingest.create_message({
         'source_device_id': DEVICE_ID,
         'type': 'NOTE',
         'sender': SENDER,
@@ -303,16 +307,18 @@ def import_note(note, existing_keys, apply_changes=True):
         'timestamp': created,
         'metadata': metadata,
     }, files, source='evernote-import',
-        max_attachment_bytes=IMPORT_MAX_ATTACHMENT_BYTES)
+        max_attachment_bytes=IMPORT_MAX_ATTACHMENT_BYTES,
+        dedupe=False)
+    message = result.message
 
-    if rejected:
+    if result.rejected:
         current = dict(message.message_metadata or {})
-        current['attachments_skipped'] = (current.get('attachments_skipped') or []) + rejected
+        current['attachments_skipped'] = (current.get('attachments_skipped') or []) + result.rejected
         message.message_metadata = current
 
     annotate_attachments(message, files)
     info['message'] = message
-    info['stored'] = len(stored)
+    info['stored'] = len(result.attachments)
     return 'created', info
 
 

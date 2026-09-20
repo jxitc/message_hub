@@ -759,10 +759,11 @@ def test_ingest_accepts_a_datetime_object_for_timestamp():
     app = create_app()
     with app.app_context():
         db.create_all()
-        message, attachments, rejected = message_ingest.create_message({
+        result = message_ingest.create_message({
             'source_device_id': 'web', 'type': 'NOTE', 'sender': 'web',
             'content': '带 datetime 的调用方', 'timestamp': __import__('datetime').datetime.now(
                 __import__('datetime').timezone.utc)}, [], source='test')
         db.session.commit()
+        message = result.message
         assert message.timestamp is not None
         assert message.source_device_id == 'web'

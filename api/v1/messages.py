@@ -97,23 +97,41 @@ def create_message():
             return jsonify({'error': 'No JSON data provided'}), 400
 
         # One shared implementation with the web "add" page — see message_ingest.
-        message, attachments, rejected = _ingest.create_message(
-            json_data, files, source='api')
+        result = _ingest.create_message(json_data, files, source='api')
         db.session.commit()
 
+        if result.duplicate:
+            # 200, not 409: this is the *desired* outcome for a client that is
+            # retrying, and a phone that treats it as success stops retrying.
+            # Every client (Android's Retrofit `isSuccessful`, the browser) does.
+            payload = {
+                'message': 'Message already exists',
+                'id': result.message.id,
+                'duplicate': True,
+                'data': result.message.to_dict(),
+            }
+            stored = (result.message.message_metadata or {}).get('attachments') or []
+            if stored:
+                payload['attachments'] = [_attachment_public(a) for a in stored]
+            if result.upgraded:
+                payload['note'] = '已存在的正文比这次上报的短，已用这次的内容替换。'
+            return jsonify(payload), 200
+
+        message = result.message
         payload = {
             'message': 'Message created successfully',
             'id': message.id,
             'data': message.to_dict()
         }
-        if attachments:
-            payload['attachments'] = [_attachment_public(a) for a in attachments]
+        if result.attachments:
+            payload['attachments'] = [_attachment_public(a) for a in result.attachments]
             payload['extraction'] = 'pending'
             payload['note'] = ('文本提取在后台进行；稍后 GET /api/v1/messages/<id> '
                                '即可看到 content 或 metadata.attachments[].extraction')
-        if rejected:
-            payload['rejected'] = rejected
+        if result.rejected:
+            payload['rejected'] = result.rejected
         return jsonify(payload), 201
+
         
     except ValidationError as e:
         return jsonify({'error': 'Validation error', 'details': e.messages}), 400

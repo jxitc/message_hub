@@ -9,6 +9,10 @@ Migrations:
 2. strip the duplicated recipient keys (``to``/``cc``/``delivered_to``/
    ``original_to``) out of email metadata, leaving ``recipients`` as the single
    source of truth. See build_payload() in mail_collector.py.
+3. add ``messages.natural_key`` + its unique index (idempotent ingest,
+   2026-09-20). The index is created on an all-NULL column, so it can be added
+   before the historical duplicates are cleaned: SQL treats NULLs as distinct,
+   and ``scripts/dedup-messages.py`` fills the column in afterwards.
 
 Safe to run repeatedly — each step checks the current shape first.
 """
@@ -80,11 +84,43 @@ def strip_redundant_recipient_keys(engine):
         return result.rowcount
 
 
+def add_natural_key(engine):
+    """Add ``messages.natural_key`` and its unique index (idempotent).
+
+    Two statements rather than one: ``db.create_all()`` does not add columns to a
+    table that already exists, so the column has to be ALTERed in. The index is
+    ``CREATE UNIQUE INDEX IF NOT EXISTS`` so it can be re-run — and it is safe to
+    create while the historical duplicate flood is still in the table, because
+    every existing row has a NULL key and NULLs are distinct in a unique index.
+    ``scripts/dedup-messages.py`` fills the keys in *after* removing duplicates.
+    """
+    inspector = inspect(engine)
+    if 'messages' not in inspector.get_table_names():
+        print("migrate: table 'messages' does not exist yet — nothing to do")
+        return False
+    changed = False
+    cols = {c['name'] for c in inspector.get_columns('messages')}
+    if 'natural_key' not in cols:
+        with engine.connect() as conn:
+            conn.execute(text('ALTER TABLE messages ADD COLUMN natural_key VARCHAR(255)'))
+            conn.commit()
+        print('migrate: added column messages.natural_key')
+        changed = True
+    with engine.connect() as conn:
+        conn.execute(text(
+            'CREATE UNIQUE INDEX IF NOT EXISTS ix_messages_natural_key '
+            'ON messages (natural_key)'))
+        conn.commit()
+    print('migrate: messages.natural_key + unique index present')
+    return changed
+
+
 def run_all():
     engine = _engine()
     print(f"migrate: engine = {engine.url.render_as_string(hide_password=True)}")
     drop_column_if_exists(engine, 'messages', 'is_read')
     strip_redundant_recipient_keys(engine)
+    add_natural_key(engine)
     print("migrate: done")
 
 

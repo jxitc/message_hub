@@ -13,8 +13,19 @@ class Message(db.Model):
     timestamp = db.Column(db.DateTime(timezone=True), nullable=False, index=True)
     received_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow, index=True)
     message_metadata = db.Column(db.JSON, default={})
+    #: The identity the channel already gave this event (see message_identity.py).
+    #: NULL for hand-written notes and for payloads that carry no channel id —
+    #: those are never deduplicated. The unique index is what actually enforces
+    #: idempotency: two simultaneous identical uploads cannot both insert, which a
+    #: check-then-insert in application code could not guarantee. SQL treats NULLs
+    #: as distinct in a unique index, so any number of unkeyed rows can coexist.
+    natural_key = db.Column(db.String(255), nullable=True)
     created_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime(timezone=True), nullable=False, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('ix_messages_natural_key', 'natural_key', unique=True),
+    )
     
     def to_dict(self):
         return {

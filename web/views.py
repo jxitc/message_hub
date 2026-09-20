@@ -13,6 +13,7 @@ import time
 import copy
 
 import message_filters as _mf
+import message_identity
 from blob_store import BlobStore as _BlobStore
 
 
@@ -393,7 +394,7 @@ def message_new():
 
     try:
         import message_ingest
-        message, attachments, rejected = message_ingest.create_message({
+        result = message_ingest.create_message({
             'source_device_id': source_device_for_web(),
             'type': form['type'],
             'sender': form['sender'] or default_sender,
@@ -407,8 +408,18 @@ def message_new():
         flash(detail, 'error')
         return render_template('message_new.html', **context)
 
+    message = result.message
+    if result.duplicate:
+        # The add page has no reason to be re-submitted with the same content, so
+        # this is worth saying out loud rather than silently redirecting to the
+        # row that was already there.
+        flash('这条消息服务器上已经有了，没有重复保存（%s）。'
+              % message_identity.describe(message.natural_key), 'info')
+        return redirect(url_for('web.message_detail', message_id=message.id))
+
     flash('已保存%s。附件提取在后台进行，稍后刷新详情页即可看到文字。'
-          % ('（%d 个附件）' % len(attachments) if attachments else ''), 'success')
+          % ('（%d 个附件）' % len(result.attachments) if result.attachments else ''),
+          'success')
     return redirect(url_for('web.message_detail', message_id=message.id))
 
 
