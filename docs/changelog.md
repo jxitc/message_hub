@@ -601,3 +601,6 @@ Time:...`），显示层又要剥一遍，冗余不正式。
   库完整性 `PRAGMA integrity_check = ok`；唯一索引实测拒绝重复插入；通知风暴窗口
   06:38–06:45 从 **11,516 行降到 150 行**。
 - **文档**：`docs/idempotency.md`。
+- **发版**：**1.6.6 (code 14)**，24.9MB，已发布到线上并核对
+  （`/api/v1/releases/latest-info` 返回 versionCode 14、`/latest` 实测下载 26,146,879 字节）。
+  手机在 App 内点更新即可装到修好的这版。
