@@ -265,14 +265,22 @@ def kind_for(mime):
     return 'file'
 
 
-def validate_upload(filename, data):
-    """Validate one uploaded file: returns (mime, kind) or raises BlobError."""
+def validate_upload(filename, data, max_bytes=None):
+    """Validate one uploaded file: returns (mime, kind) or raises BlobError.
+
+    `max_bytes` lets a caller with different constraints raise its own ceiling —
+    the archive importer does exactly that, because the 1MB limit exists for phone
+    and browser uploads (mobile data, a 1-vCPU box, compressible images) and none of
+    those apply when importing a file that is already on the server. The sniffing and
+    the type whitelist stay shared, so only the ceiling differs.
+    """
+    limit = max_bytes or MAX_ATTACHMENT_BYTES
     if not data:
         raise BlobError('文件是空的')
-    if len(data) > MAX_ATTACHMENT_BYTES:
+    if len(data) > limit:
         raise BlobError(
             '文件太大（%.0f KB > %d KB）。图片请在手机端压缩后再传，其他类型请换小一些的文件。'
-            % (len(data) / 1024, MAX_ATTACHMENT_BYTES // 1024), status=413)
+            % (len(data) / 1024, limit // 1024), status=413)
     ext = os.path.splitext(filename or '')[1].lower()
     if ext in _DANGEROUS_TEXT_EXT:
         raise BlobError(describe_rejection(filename))

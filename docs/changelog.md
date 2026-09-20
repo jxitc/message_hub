@@ -494,4 +494,43 @@ Time:...`），显示层又要剥一遍，冗余不正式。
   另用真实形状的 `.enex`（含 CDATA 里的 ENML、base64 附件、1.17MB 超大附件、空笔记）
   在临时库上跑通"演练 → 写入 → 重复导入"三遍，落库结果逐条核对无误。
 - 文档：`docs/evernote-import.md`（导出步骤、scp、演练/写入、可重入与安全说明、常见问题）。
+## 2026-09-20（Evernote 导入：字段审计 + 三个真 bug）
+
+- **背景**：用户把 342MB 真实导出（`evnote_20260920_backup.enex`，338 条笔记 / 572 个附件）
+  传上来准备导入。导入前先做了**逐字段审计**，结果发现 8 个字段原本会静默丢掉。
+- **审计方法**：写 `scripts/profile-enex.py` 流式统计（17 秒扫完 326MB，**不把内容喂给 LLM**），
+  再枚举导出里出现的**每一个标签**及其出现次数，逐个对到我们的模型上。
+- **Evernote 导出格式的实际情况（实测，非照文档猜）**：
+  - **新版导出不带 GUID**（`note-attributes` 只有 author/source 等），所以去重键的兜底路径是常态；
+  - 标题重复极多：26 条「无标题笔记」、10 条「未命名 - 名片」、5 条「王艳 - 名片」、4 条「婚礼」——
+    **只按标题哈希会静默丢掉约 47 条**。最终键 = `GUID（有则用）`，否则 `sha1(标题 + 创建时间)`：
+    稳定（不含正文 → 改了内容重导仍是 no-op）、且实测 338 条两两唯一。
+  - 那份导出里**没有** `notebook`、没有 `guid`、没有独立 description 字段（正文即描述）。
+- **补齐的 8 个字段**：`author`、`source`、`source-application`、`content-class`、`subject-date`
+  收进 `metadata.evernote` 命名空间（通用概念 `title`/`tags`/`url` 保持扁平）；
+  资源的 `width`/`height` 与 `source-url` 记到附件记录上（附件详情页现在会显示"1080 × 2376 像素"
+  与原始出处）。已加测试 `test_every_evernote_field_finds_a_home` 锁死这个映射。
+- **导入专用附件上限**：`IMPORT_MAX_ATTACHMENT_BYTES`（默认 25MB，`--max-attachment-bytes` 可改）。
+  与客户端的 1MB 上限**故意不同**：那 1MB 是为手机/网页上传定的（移动流量、1 核、图片可压缩），
+  本地导入档案时这些约束都不成立——实测这份档案里最重要的文件恰好超 1MB（护照、签证函、竞业协议、
+  户口本、13MB 施工图，共 50 个 / 163MB）。
+- **抓到并修掉三个"看起来成功、实际丢数据"的 bug**（都是验证抓的，不是读代码读出来的）：
+  1. **演练其实在写库写盘**：`main()` 没把 `apply_changes=args.apply` 传下去（默认 True），
+     且重构时把"演练要 rollback"改成了无条件 `commit` → 本地多 336 条消息 + 77MB 孤儿文件。
+     靠"演练后核对没多东西"这一步发现；已加 `test_dry_run_writes_nothing`。
+  2. **导入上限形同虚设**：导入器只在自己这层比了大小，而 `validate_upload()` 内部仍按客户端
+     1MB 判定 → **50 个护照/签证/合同扫描件全被当成"超限"跳过**。靠追问"572 个附件为什么只入库
+     516 个"发现。修法：`validate_upload(max_bytes=...)` 让上限一路传到真正判断的那一层，
+     并加 `test_import_cap_actually_reaches_the_validator`。
+  3. **`attachments_skipped` 会静默消失**：重构时把它移进了 `if rejected:` 分支，于是超限附件
+     唯一的痕迹没了。单元测试抓到。
+  另修：把尺寸标注写在了 `create_message` **之前**，而它内部会重新生成附件记录并覆盖 metadata，
+  标注全被丢掉（还白读一遍字节）——改为建完消息再标注**真正入库的那组**。
+- **验证**：pytest **125 例全过**（新增 Evernote 相关 17 条）。线上演练：**336 条将导入、
+  564 个附件、0 失败、0 碰撞**，且演练零副作用（消息数不变、blob 不变）。
+  字段覆盖实测：author 217 / source 291 / source-application 60 / content-class 19 /
+  subject-date 3 / 笔记级 source-url 21；附件尺寸 483 个、资源出处 564 个。
+- **不存的**：`application-data`（35 个，应用私有数据，体积不可控且无用途）；
+  类型不在白名单的 8 个文件（APK 22MB、2 个 xlsx、2 个 docx、2 个 m4a、1 个许可证）——
+  记进 `attachments_skipped`，笔记正文照常保留。
 

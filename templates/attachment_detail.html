@@ -169,6 +169,14 @@
                             <td>{{ attachment.size|human_size }} <span class="text-muted small">({{ attachment.size }} 字节)</span></td></tr>
                         <tr><th class="text-muted fw-normal">类型</th>
                             <td><code>{{ attachment.mime }}</code> <span class="badge bg-secondary">{{ attachment.kind }}</span></td></tr>
+                        {% if attachment.width and attachment.height %}
+                        <tr><th class="text-muted fw-normal">尺寸</th>
+                            <td>{{ attachment.width }} × {{ attachment.height }} 像素</td></tr>
+                        {% endif %}
+                        {% if attachment.source_url %}
+                        <tr><th class="text-muted fw-normal">原始出处</th>
+                            <td class="small"><a href="{{ attachment.source_url }}" target="_blank" rel="noopener">{{ attachment.source_url[:80] }}</a></td></tr>
+                        {% endif %}
                         <tr><th class="text-muted fw-normal">来源</th>
                             <td>{{ attachment.source or '未知' }}{% if attachment.origin %} · <span class="text-muted small">{{ attachment.origin }}</span>{% endif %}</td></tr>
                         <tr><th class="text-muted fw-normal">sha256</th>

@@ -59,14 +59,72 @@ cd /opt/message_hub
 https://mh.jxitc.com/messages?device=evernote-import
 ```
 
+## 字段映射（Evernote → Message Hub）
+
+导入前逐字段核对过**真实导出**里出现的每一个标签（不是照文档猜的）：
+
+| Evernote | 出现次数 | 落到我们这边 |
+|---|---|---|
+| `title` | 338 | `metadata.title` |
+| `content`（ENML/XHTML） | 338 | `content`（ENML→纯文本） |
+| `created` | 338 | `timestamp`（**列**，用创建时间而非导入时间） |
+| `updated` | 338 | `metadata.evernote.updated` |
+| `tag` ×N | 55 | `metadata.tags[]` |
+| `resource` ×N | 572 | `metadata.attachments[]` + blob |
+| `note-attributes/source-url` | 21 | `metadata.url` |
+| `note-attributes/author` | 217 | `metadata.evernote.author` |
+| `note-attributes/source` | 291 | `metadata.evernote.source`（哪个客户端，如 `desktop.mac`） |
+| `note-attributes/source-application` | 60 | `metadata.evernote.source_application` |
+| `note-attributes/content-class` | 19 | `metadata.evernote.content_class` |
+| `note-attributes/subject-date` | 3 | `metadata.evernote.subject_date` |
+| `resource/mime` | 572 | `attachment.mime` |
+| `resource-attributes/file-name` | 572 | `attachment.name` |
+| `resource/width`+`height` | 483 | `attachment.width` / `height`（详情页会显示"1080 × 2376 像素"） |
+| `resource-attributes/source-url` | 572 | `attachment.source_url`（这张图的原始出处） |
+| `resource-attributes/application-data` | 35 | ⚠️ **不存**（应用私有数据，如 Skitch 标注；体积不可控且对我们无用） |
+| `guid` | **0** | 这份导出没有 → 用 `sha1(标题+创建时间)` 当键 |
+| `notebook` | **0** | 这份导出没有；若将来有则进 `metadata.notebook` |
+
+我们自己有、Evernote 没有的：`source_device_id`（固定 `evernote-import`）、`type`（`NOTE`）、
+`sender`（`Evernote`）、`received_at`（导入时间），以及附件的内容寻址 key/sha256/提取状态。
+
+**"description"**：Evernote 的笔记没有独立描述字段——正文就是描述。这份导出里也确认没有。
+
+**通用概念（`title`/`tags`/`url`）保持扁平**，Evernote 专属字段集中放进 `metadata.evernote` 命名空间。
+这符合"渠道不进 schema，渠道细节进 JSON"那条原则。
+
+## 附件与提取：与其他渠道完全同一套
+
+附件记录的形状对**所有渠道都一样**，与手机上传、邮件附件、网页添加没有任何区别：
+
+```
+{ key, sha256, kind, mime, size, name, extraction: {status, engine, chars, ...} }
++ Evernote 额外给的：width / height / source_url（可选字段，别的渠道将来也能用）
+```
+
+提取流水线是**渠道无关**的：`extraction.py` 只看 `kind`/`mime` 决定用 `pdftotext` 还是
+`tesseract`，结果写进同一处（`content`，或正文非空时写进
+`metadata.attachments[i].extraction.text`）。所以：
+
+- 导入后**后台自动 OCR/抽取**，和邮件、手机附件一样，不需要额外操作；
+- 附件详情页（`/messages/<id>/attachments/<n>`）对它同样可用：原件、处理信息、提取文本、重跑按钮；
+- `scripts/reextract.py --all/--ocr` 同样适用；
+- 反过来说，**这批档案是这套流水线目前最大的一批真实输入**（483 张图 + 81 个 PDF）。
+
 ## 安全与可重入
 
-- **按笔记 GUID 去重**，存在 `metadata.evernote_guid`。同一份导出重复导入**不会产生重复**，
-  中途打断再跑会接着补，所以放心分批导。
-- **附件超 1MB 不会导致笔记失败**：附件记进 `metadata.attachments_skipped` 并说明原因，
+- **去重键**存在 `metadata.evernote_key`：有 Evernote GUID 就用 GUID，**没有则用
+  `sha1(标题 + 创建时间)`**。新版 Evernote 导出（v11 实测）**不带 GUID**，所以后者是常态。
+  它**不含正文**，所以你在 Evernote 里改过内容再重导仍然是 no-op——这正是"一次性搬迁"需要的性质。
+  为什么不用"只哈希标题"：真实档案里标题重复很多（这份有 26 条「无标题笔记」、10 条「未命名 - 名片」），
+  只按标题会让它们互相覆盖、静默丢掉 25 条。创建时间能把它们分开。
+  万一出现"标题与创建时间都相同"的两条，脚本会在报告里**显式列出碰撞**，不会伪装成正常的跳过。
+- **导入的附件上限是 25MB，不是上传的 1MB**（`IMPORT_MAX_ATTACHMENT_BYTES`，可用
+  `--max-attachment-bytes` 覆盖）。两个上限不同是**故意的**：1MB 是为手机/网页上传定的
+  （移动流量、1 核机器、图片可压缩），而本地导入一份已有档案时这些约束都不成立——
+  实测你这批档案里最有价值的文件恰恰超过 1MB（护照、签证函、竞业协议、户口本、13MB 施工图）。
+- 超限或类型不支持的附件**不会让笔记失败**：记进 `metadata.attachments_skipped` 并说明原因，
   正文照常保留。想看哪些没存下来，打开那条消息的详情页就有清单。
-  （导入路径的这条规则与上传接口**故意不同**：上传时 413 是硬错误，因为客户端能压缩重试；
-  批量导入时谁也没法压缩那个文件，丢整条笔记才是真损失。）
 - 走的是与手机端、网页版**同一个** `message_ingest`，所以限额与类型白名单没有被绕过。
 - 空笔记（无正文也无附件）会跳过，不占时间线。
 
