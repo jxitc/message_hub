@@ -28,7 +28,7 @@ message_create_schema = MessageCreateSchema()
 docs_note = 'see docs/attachments.md'
 
 
-def store_attachments(files):
+def store_attachments(files, max_bytes=None):
     """Validate + store uploaded files. Returns (attachments, rejected).
 
     Imported lazily: `api.v1.blobs` pulls in Flask request context helpers, and
@@ -37,10 +37,10 @@ def store_attachments(files):
     if not files:
         return [], []
     from api.v1.blobs import store_uploads
-    return store_uploads(files)
+    return store_uploads(files, max_bytes=max_bytes)
 
 
-def create_message(json_data, files=None, *, source=None):
+def create_message(json_data, files=None, *, source=None, max_attachment_bytes=None):
     """Build (but do not commit) a Message from a payload plus optional files.
 
     Raises `BlobError` for anything the client can fix (too large, wrong type,
@@ -49,6 +49,10 @@ def create_message(json_data, files=None, *, source=None):
 
     `source` is only used for the log line, so an operator reading the journal can
     tell whether the message came in over the API or from the web page.
+
+    `max_attachment_bytes` raises the per-file ceiling for callers whose constraints
+    differ from a phone upload (see scripts/import-evernote.py). It is threaded all
+    the way down to the validation that enforces it.
     """
     json_data = dict(json_data or {})
     # marshmallow's DateTime field only accepts a string (it runs the value through
@@ -62,7 +66,7 @@ def create_message(json_data, files=None, *, source=None):
             stamp = stamp.replace(tzinfo=timezone.utc)
         json_data['timestamp'] = stamp.astimezone(timezone.utc).isoformat()
 
-    attachments, rejected = store_attachments(files)
+    attachments, rejected = store_attachments(files, max_bytes=max_attachment_bytes)
     if files and not attachments:
         raise BlobError(rejected[0]['error'] if rejected else '附件均未通过校验',
                         status=415)

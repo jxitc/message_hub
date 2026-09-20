@@ -90,8 +90,14 @@ def blob_url(key, signed=False):
     return url
 
 
-def store_uploads(files, store=None):
+def store_uploads(files, store=None, max_bytes=None):
     """Validate and store uploaded files. Returns (attachments, errors).
+
+    `max_bytes` overrides the per-file ceiling for callers with different
+    constraints (the archive importer). It must be threaded through to
+    validate_upload: passing it only to a caller-side pre-check leaves this layer
+    enforcing the client limit, which silently refuses files that the caller already
+    accepted — that cost 39 notes with passport and visa scans on a real import.
 
     Attachments are ordered and carry everything the UI and the extractor need:
     content hash, human-readable name, sniffed mime, size, and an extraction slot
@@ -104,7 +110,7 @@ def store_uploads(files, store=None):
         name = (uploaded.filename or '').strip()
         data = uploaded.read()
         try:
-            mime, kind = validate_upload(name, data)
+            mime, kind = validate_upload(name, data, max_bytes=max_bytes)
         except BlobError as exc:
             # Size is a hard constraint the client must satisfy before retrying
             # (compress, or pick another file), so it fails the whole request.

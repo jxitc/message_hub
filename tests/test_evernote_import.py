@@ -371,3 +371,27 @@ def test_every_evernote_field_finds_a_home(app, store):
         assert attachment['name'] == 'shot.png'
         assert attachment['width'] == 1080 and attachment['height'] == 2376
         assert attachment['source_url'] == 'https://cdn.example.com/shot.png'
+
+
+def test_import_stores_an_attachment_over_the_client_cap(app, store):
+    """Regression, and the test that was missing: read_resources honoured the import
+    ceiling but the store path still enforced the client's 1MB, so a real import
+    refused 39 notes whose scans were over 1MB. A dry run cannot catch this — it
+    deliberately does not touch the write path — which is exactly why the note is
+    imported for real here."""
+    payload = make_png() + b'\x00' * (2 * 1024 * 1024)          # ~2MB
+    assert len(payload) > blob_store.MAX_ATTACHMENT_BYTES
+
+    with app.app_context():
+        db.create_all()
+        status, info = evernote.import_note(
+            note_xml(resource_blob=payload, resource_name='passport-scan.png'), set())
+        db.session.commit()
+
+        assert status == 'created', info
+        attachments = info['message'].message_metadata['attachments']
+        assert len(attachments) == 1
+        assert attachments[0]['name'] == 'passport-scan.png'
+        assert attachments[0]['size'] == len(payload)
+        assert store.exists(attachments[0]['key'])
+        assert not info['message'].message_metadata.get('attachments_skipped')

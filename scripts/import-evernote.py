@@ -302,7 +302,8 @@ def import_note(note, existing_keys, apply_changes=True):
         'content': body,
         'timestamp': created,
         'metadata': metadata,
-    }, files, source='evernote-import')
+    }, files, source='evernote-import',
+        max_attachment_bytes=IMPORT_MAX_ATTACHMENT_BYTES)
 
     if rejected:
         current = dict(message.message_metadata or {})

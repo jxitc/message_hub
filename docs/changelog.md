@@ -533,4 +533,24 @@ Time:...`），显示层又要剥一遍，冗余不正式。
 - **不存的**：`application-data`（35 个，应用私有数据，体积不可控且无用途）；
   类型不在白名单的 8 个文件（APK 22MB、2 个 xlsx、2 个 docx、2 个 m4a、1 个许可证）——
   记进 `attachments_skipped`，笔记正文照常保留。
+## 2026-09-20（正式导入 Evernote 336 条 + 同一个上限 bug 的另一半）
+
+- **导入完成**：**336 条笔记 / 564 个附件 / 216.8MB**，时间跨度 2011-11-25 → 2023-06-22，
+  正文合计 388,957 字符；标签 51 条、来源链接 21 条；483 个附件带尺寸、564 个带原始出处。
+  8 个附件因类型不在白名单未存（APK/xlsx/docx/m4a/许可证），已记进 `attachments_skipped`。
+- **同一类 bug 的第二半**：上一次只把导入上限传给了**校验**那一步，真正入库的
+  `store_uploads` 内部仍按 1MB 判 → **39 条带大附件的笔记在写入时被拒**。
+  **演练看不见它**（演练按设计不走写入路径），只有真跑才暴露——这正是"演练通过 ≠ 能导入"的实例。
+  修法：`store_uploads(..., max_bytes=)` → `validate_upload(..., max_bytes=)`，把上限一路传到
+  真正做判断的那一层；`message_ingest.create_message(..., max_attachment_bytes=)` 透传。
+  补了 `test_import_stores_an_attachment_over_the_client_cap`（**真跑一次导入**并断言附件入库）
+  —— 之前缺的就是这条，它才是能抓住这个 bug 的测试。
+- **幂等的价值当场兑现**：修好后重跑，**补上 39 条、跳过 297 条已导入的、0 重复、0 失败**。
+- **验证**：pytest 126 例全过。线上库核对：336 条、564 个附件、`attachments_skipped` 8 个，
+  `source_device_id=evernote-import`、`sender=Evernote` 可用于筛选与撤销
+  （`POST /api/v1/messages/delete {"device":"evernote-import"}` 演练返回 would_delete=336）。
+- **提取自动在跑**：完成后 90 个已提取（tesseract 77 / pdftotext 5 / 扫描件回退 pdftoppm+tesseract 8）、
+  43 个"无文字"、431 个排队；已提取 101,678 字符，单件最多 9,741（一份扫描的成绩单）。
+- **一处数据说明**：`metadata.evernote.updated` 大部分是真实最后编辑时间（2011–2026），
+  但有 **46 条等于导出当天**——Evernote 在导出/同步时碰过它们，所以别把它当作可靠的历史编辑时间。
 
