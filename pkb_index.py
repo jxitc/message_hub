@@ -214,6 +214,13 @@ def sample_gist(entity_id, query, limit=2):
 
 
 def get_entity(entity_id):
+    """One entity by its **stable** id (a hash of the normalised name).
+
+    The id is stable across index rebuilds on purpose: links live in browser
+    tabs, bookmarks and stored QA history, and an id that shifts on every
+    re-extraction would silently point them at a different entity — which is
+    exactly what happened when this was an autoincrement integer.
+    """
     conn = _connect()
     if conn is None:
         return None

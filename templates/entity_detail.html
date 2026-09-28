@@ -37,7 +37,7 @@
             <a class="btn btn-sm btn-outline-secondary mb-1 me-1"
                href="{{ url_for('web.entity_detail', entity_id=co.id) }}">
                 {{ co.name }}
-                <span class="badge bg-light text-dark">{{ co.shared }}</span>
+                <span class="badge bg-secondary">{{ co.shared }}</span>
             </a>
         {% endfor %}
     </div>
@@ -59,7 +59,7 @@
                     {% if item.event_date %}
                         <span class="badge bg-info text-dark" title="事件日期">{{ item.event_date }}</span>
                     {% endif %}
-                    <span class="badge bg-light text-dark">{{ item.message.type }}</span>
+                    <span class="badge bg-secondary">{{ item.message.type }}</span>
                 </div>
                 <div class="mt-1">
                     {% if item.gist %}

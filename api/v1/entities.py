@@ -49,7 +49,7 @@ def list_entities():
     })
 
 
-@api_v1.route('/entities/<int:entity_id>', methods=['GET'])
+@api_v1.route('/entities/<entity_id>', methods=['GET'])
 def get_entity(entity_id):
     entity = _idx.get_entity(entity_id)
     if entity is None:
@@ -58,11 +58,11 @@ def get_entity(entity_id):
         'entity': entity,
         'kind_label': _idx.KIND_LABELS.get(entity['kind'], entity['kind']),
         'co_entities': _idx.co_entities(entity_id),
-        'messages_url': '/api/v1/entities/%d/messages' % entity_id,
+        'messages_url': '/api/v1/entities/%s/messages' % entity_id,
     })
 
 
-@api_v1.route('/entities/<int:entity_id>/messages', methods=['GET'])
+@api_v1.route('/entities/<entity_id>/messages', methods=['GET'])
 def entity_messages(entity_id):
     """Every raw message this entity appears in — the point of the whole thing.
 

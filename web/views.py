@@ -888,13 +888,14 @@ def entities():
         q=query, kind=kind, order=order, limit=limit)
 
 
-@web.route('/entities/<int:entity_id>')
+@web.route('/entities/<entity_id>')
 def entity_detail(entity_id):
     """Everything the hub has about one entity, with the raw messages behind it."""
     import pkb_index
     entity = pkb_index.get_entity(entity_id)
     if entity is None:
-        flash('没有这个实体（索引可能刚重建过，id 会变）。', 'warning')
+        flash('没有这个实体。可能是链接来自旧页面，或者这个实体在新的索引里已经不在了。',
+              'warning')
         return redirect(url_for('web.entities'))
 
     gists = pkb_index.gists_for(entity_id)
@@ -937,6 +938,60 @@ def _entities_of(message_id):
 # 以及"我直接 curl 一下"看到的是同一个东西，而这条链路本身还在调试期，
 # 少一层前端状态就少一类"到底是哪边错了"。
 # ---------------------------------------------------------------------------
+
+def _render_answer(answer, sources):
+    """模型回答的极简 markdown 渲染。
+
+    回答本身是给人和模型读的，里面大量用 **加粗**、`- ` 列表，而 Jinja 的默认
+    自动转义只保证安全、不负责排版——结果页面上直接显示 `**结论：**` 这种原始标记，
+    看起来像坏了。所以这里做三件事，顺序不能变：
+
+    1. **先转义**：库里存的是别人发来的短信和邮件，绝不能因为要渲染就开 XSS 口子；
+    2. 再把一小撮标记变成 HTML（加粗、行内代码、列表、换行）——只认这几种，
+       不引入 markdown 库：我们不需要表格/标题/图片，而多一个解析器就多一份风险；
+    3. 最后替换引用编号 [n]，因为它变成的是链接，不该被第 2 步当成普通文本。
+
+    返回 Markup 是必须的：第 2、3 步产出的都是我们自己拼的标签，得让 Jinja 知道
+    已经处理过了。安全的前提是第 1 步先转义了原文。
+    """
+    from markupsafe import Markup, escape
+
+    text = str(escape(answer or ''))
+    text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+    text = re.sub(r'`([^`]+?)`', r'<code>\1</code>', text)
+
+    lines, html = text.split('\n'), []
+    in_list = False
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith(('- ', '* ', '• ')):
+            if not in_list:
+                html.append('<ul class="mb-1">')
+                in_list = True
+            html.append('<li>%s</li>' % stripped[2:])
+            continue
+        if in_list:
+            html.append('</ul>')
+            in_list = False
+        if stripped:
+            html.append('<p class="mb-1">%s</p>' % stripped)
+    if in_list:
+        html.append('</ul>')
+
+    rendered = Markup('\n').join(Markup(part) for part in html)
+
+    def replace(match):
+        index = int(match.group(1))
+        if not 1 <= index <= len(sources):
+            return match.group(0)
+        source = sources[index - 1]
+        return Markup('<a href="%s" class="badge bg-primary text-decoration-none" '
+                      'title="%s">[%d]</a>') % (
+            url_for('web.message_detail', message_id=source['id']),
+            escape(source['text'][:120]), index)
+
+    return Markup(re.sub(r'\[(\d{1,3})\]', replace, str(rendered)))
+
 
 def _linkify_citations(answer, sources):
     """把回答里的 [3] 变成指向原始消息的链接。
@@ -997,7 +1052,7 @@ def ask():
     history = (QaTurn.query.order_by(QaTurn.created_at.desc()).limit(20).all())
     return render_template('ask.html', question=question, turn=turn, error=error,
                            history=history,
-                           linkify=_linkify_citations,
+                           linkify=_render_answer,
                            currency=current_app.config.get('LLM_PRICE_CURRENCY', '¥'),
                            price_in=current_app.config.get('LLM_PRICE_INPUT_PER_M'),
                            price_out=current_app.config.get('LLM_PRICE_OUTPUT_PER_M'),

@@ -143,6 +143,27 @@ footer .text-muted { color: var(--mh-muted) !important; }
 .toast-container { position: fixed; top: 20px; right: 20px; z-index: 1055; }
 .toast { background-color: var(--mh-surface-2); color: var(--mh-text); border: 1px solid var(--mh-border); }
 
+/* form-text 的提示文字：Bootstrap 5.3 用 --bs-secondary-color，在浅色主题下是深灰，
+   压在这个暗色主题上几乎看不见（截图确认过：搜索框下面那行提示基本消失）。
+   这是全局修，其他页面同样受益。 */
+.form-text { color: var(--mh-muted); }
+
+/* 弹窗类：Bootstrap 的 alert-light / alert-secondary 是浅底深字，
+   在暗色主题里会变成一块白。统一按暗色面板处理，语义色（warning/danger/success）
+   保留 Bootstrap 的默认，因为它们本来就是深底浅字。 */
+.alert-light, .alert-secondary {
+    background-color: var(--mh-surface-2);
+    border-color: var(--mh-border);
+    color: var(--mh-text);
+}
+
+/* 浅色底的 badge：暗色主题下换成面底色，避免一堆白色小块 */
+.badge.bg-light {
+    background-color: var(--mh-surface-2) !important;
+    color: var(--mh-text) !important;
+    border: 1px solid var(--mh-border);
+}
+
 /* Utilities */
 .text-truncate-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .border-start-primary { border-left: 4px solid var(--primary-color) !important; }

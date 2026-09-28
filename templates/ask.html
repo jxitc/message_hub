@@ -104,7 +104,7 @@
             <summary class="p-2 small text-muted" style="cursor:pointer">
                 看这一步步是怎么走的（改写 / 实体 / 召回 / 耗时 / tokens）
             </summary>
-            <div class="p-3 border-top bg-body-tertiary small">
+            <div class="p-3 border-top mh-panel small">
                 <div class="mb-2">
                     <strong>① 改写问题</strong>
                     <div class="ms-3">原问题：{{ turn.question }}</div>
@@ -170,7 +170,7 @@
                     <div class="ms-3">
                         {% for source in turn.sources or [] %}
                         <div class="mb-1">
-                            <span class="badge bg-light text-dark">[{{ loop.index }}]</span>
+                            <span class="badge bg-secondary">[{{ loop.index }}]</span>
                             <a href="{{ url_for('web.message_detail', message_id=source.id) }}">{{ source.text[:56] }}</a>
                             <span class="text-muted">← {{ source.why|join(' + ') }}</span>
                         </div>
@@ -199,10 +199,17 @@
         </td>
         <td class="text-muted small">{{ (item.sources or [])|length }} 条</td>
         <td class="text-muted small text-nowrap">{{ currency }}{{ '%.4f'|format(item.cost or 0) }}</td>
-        <td>
-            {% if item.rating == 'good' %}<span class="badge bg-success">👍</span>
-            {% elif item.rating == 'bad' %}<span class="badge bg-danger" title="{{ item.rating_note or '' }}">👎</span>
-            {% else %}<span class="text-muted small">—</span>{% endif %}
+        <td class="text-nowrap">
+            {# 历史里也能补评：经常是过一会儿才想起"这条答得不对"，只让刚问完那条能评
+               等于把调试入口关掉一半。 #}
+            <form method="post" action="{{ url_for('web.ask_rate', turn_id=item.id) }}"
+                  class="d-inline">
+                <button class="btn btn-sm py-0 px-1 {% if item.rating == 'good' %}btn-success{% else %}btn-outline-success{% endif %}"
+                        name="rating" value="good" title="答得好">👍</button>
+                <button class="btn btn-sm py-0 px-1 {% if item.rating == 'bad' %}btn-danger{% else %}btn-outline-danger{% endif %}"
+                        name="rating" value="bad" title="{{ item.rating_note or '答得不好' }}">👎</button>
+            </form>
+            {% if item.rating_note %}<span class="text-muted small ms-1">{{ item.rating_note }}</span>{% endif %}
         </td>
     </tr>
     {% else %}

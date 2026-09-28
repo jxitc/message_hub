@@ -48,6 +48,18 @@ class QaTurn(db.Model):
     created_at = db.Column(db.DateTime(timezone=True), nullable=False,
                            default=datetime.utcnow, index=True)
 
+    @property
+    def tokens(self):
+        """Token counts as one object, so the template and the API agree.
+
+        The API serialises this as a nested dict while the web page renders the
+        model directly, and those two shapes drifting is how the page broke: the
+        template asked for `turn.tokens.prompt`, the model only had
+        `tokens_prompt`, and every rendered answer became a 500. One attribute,
+        one shape, both callers.
+        """
+        return {'prompt': self.tokens_prompt, 'completion': self.tokens_completion}
+
     def to_dict(self, with_steps=True):
         payload = {
             'id': self.id,
@@ -60,8 +72,7 @@ class QaTurn(db.Model):
             'source_count': len(self.sources or []),
             'elapsed_ms': self.elapsed_ms,
             'cost': self.cost,
-            'tokens': {'prompt': self.tokens_prompt,
-                       'completion': self.tokens_completion},
+            'tokens': self.tokens,
             'source': self.source,
             'conversation_id': self.conversation_id,
             'rating': self.rating,
