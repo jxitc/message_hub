@@ -110,6 +110,27 @@
                 </div>
                 {% endif %}
 
+                <!-- Entities Section -->
+                {% if entities %}
+                <div class="mb-4">
+                    <h6 class="text-muted mb-2">实体（{{ entities|length }}）:</h6>
+                    <div class="p-3 mh-panel">
+                        {% for entity in entities %}
+                            <a class="btn btn-sm btn-outline-primary mb-1 me-1"
+                               href="{{ url_for('web.entity_detail', entity_id=entity.id) }}"
+                               title="看这个实体的全部相关消息">
+                                {{ entity.name }}
+                                <span class="badge bg-light text-dark">{{ entity.kind }}</span>
+                            </a>
+                        {% endfor %}
+                        <div class="form-text mt-2">
+                            这是<strong>派生索引</strong>（由 LLM 从原始信息里抽出来，存在
+                            <code>instance/pkb.db</code>），可以整个丢掉重建；原始信息不受影响。
+                        </div>
+                    </div>
+                </div>
+                {% endif %}
+
                 <!-- Metadata Section -->
                 {% if message.message_metadata %}
                 <div class="mb-4">

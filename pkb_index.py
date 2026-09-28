@@ -106,39 +106,111 @@ def stats():
     }
 
 
-def search_entities(query=None, kind=None, limit=60, order='mentions'):
-    """Entities matching `query` (substring on name), most-mentioned first.
+def search_entities(query=None, kind=None, limit=60, order='mentions',
+                    evidence_message_ids=None):
+    """Entities matching `query`, most-mentioned first.
+
+    A name-only search does not work, and the data says so plainly: on this hub
+    `奥斯丁` (0 name hits, 3 evidence hits), `学校` (0 / 6) and `面试` (0 / 5)
+    all match nothing by name, because the extracted name for the Austin car
+    rental is "Cancun租车预订" — the name the model chose is not the word a person
+    types. So a query matches an entity three ways:
+
+    * **name**   — substring of the display name or the normalised key
+    * **gist**   — substring of a one-line summary of a message it appears in
+    * **content** — a message it appears in has matching raw text. The caller
+      finds those ids in the hub database (that is where the text lives) and
+      passes them in; this module never reaches into the hub's own tables.
+
+    Each hit carries `match` and `match_hits` so the UI can say *why* it matched
+    — an unexplained hit is indistinguishable from a bug.
 
     Substring rather than FTS on purpose: at this size a LIKE scan is instant,
-    and Chinese name lookup by substring works without a tokenizer plugin — an
-    FTS5 `unicode61` index treats a run of Han characters as ONE token, so
+    and an FTS5 `unicode61` index treats a run of Han characters as ONE token, so
     searching 消耗 or 丽 would silently return nothing.
     """
     conn = _connect()
     if conn is None:
         return []
-    sql = ('SELECT e.id, e.name, e.kind, e.mentions, e.first_ts, e.last_ts '
-           'FROM entities e WHERE 1=1')
-    params = []
-    if query:
-        sql += ' AND (e.name LIKE ? OR e.norm LIKE ?)'
-        params += ['%' + query + '%', '%' + query.lower() + '%']
-    if kind:
-        sql += ' AND e.kind = ?'
-        params.append(kind)
-    if order == 'recent':
-        sql += ' ORDER BY e.last_ts DESC NULLS LAST, e.mentions DESC'
-    else:
-        sql += ' ORDER BY e.mentions DESC, e.name ASC'
-    sql += ' LIMIT ?'
-    params.append(limit)
+
+    like = '%' + (query or '') + '%'
+    matches = {}      # entity_id -> {'match': str, 'hits': int}
+
     try:
+        if query:
+            for row in conn.execute(
+                    'SELECT id FROM entities WHERE name LIKE ? OR norm LIKE ?',
+                    (like, like.lower())):
+                matches[row['id']] = {'match': 'name', 'hits': 1}
+            for row in conn.execute(
+                    '''SELECT e.id, COUNT(*) n FROM entities e
+                       JOIN mentions me ON me.entity_id = e.id
+                       JOIN messages m ON m.id = me.message_id
+                       WHERE m.gist LIKE ? GROUP BY e.id''', (like,)):
+                entry = matches.setdefault(row['id'], {'match': 'gist', 'hits': 0})
+                entry['hits'] += row['n']
+            if evidence_message_ids:
+                marks = ','.join('?' * len(evidence_message_ids))
+                for row in conn.execute(
+                        '''SELECT entity_id, COUNT(*) n FROM mentions
+                           WHERE message_id IN (%s) GROUP BY entity_id''' % marks,
+                        list(evidence_message_ids)):
+                    entry = matches.setdefault(row['entity_id'],
+                                               {'match': 'content', 'hits': 0})
+                    entry['hits'] += row['n']
+
+        sql = ('SELECT e.id, e.name, e.kind, e.mentions, e.first_ts, e.last_ts '
+               'FROM entities e WHERE 1=1')
+        params = []
+        if query:
+            if not matches:
+                return []
+            sql += ' AND e.id IN (%s)' % ','.join('?' * len(matches))
+            params += list(matches)
+        if kind:
+            sql += ' AND e.kind = ?'
+            params.append(kind)
+        if order == 'recent':
+            sql += ' ORDER BY e.last_ts DESC NULLS LAST, e.mentions DESC'
+        else:
+            sql += ' ORDER BY e.mentions DESC, e.name ASC'
+        sql += ' LIMIT ?'
+        params.append(limit)
         rows = [dict(r) for r in conn.execute(sql, params)]
     except sqlite3.Error:
         return []
     finally:
         conn.close()
+
+    for row in rows:
+        info = matches.get(row['id'])
+        row['match'] = (info or {}).get('match')
+        row['match_hits'] = (info or {}).get('hits', 0)
+        row['score'] = row['mentions'] + 10 * row['match_hits']
+    if query:
+        # A name hit is a stronger signal than an evidence hit, so it sorts first
+        # within its own tier; both beat "matched nothing but was in the list".
+        rows.sort(key=lambda r: (r['match'] != 'name', -r['score']))
     return rows
+
+
+def sample_gist(entity_id, query, limit=2):
+    """The matching one-line summaries for an entity, to show *why* it hit."""
+    conn = _connect()
+    if conn is None:
+        return []
+    try:
+        like = '%' + (query or '') + '%'
+        return [{'gist': r['gist'], 'event_date': r['event_date'],
+                 'message_id': r['id']} for r in conn.execute(
+            '''SELECT m.id, m.gist, m.event_date FROM mentions me
+               JOIN messages m ON m.id = me.message_id
+               WHERE me.entity_id = ? AND (m.gist LIKE ? OR m.raw_json LIKE ?)
+               ORDER BY m.ts DESC LIMIT ?''', (entity_id, like, like, limit))]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
 
 
 def get_entity(entity_id):

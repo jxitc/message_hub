@@ -508,7 +508,10 @@ def message_detail(message_id):
             flash('Message not found', 'error')
             return redirect(url_for('web.messages'))
         
-        return render_template('message_detail.html', message=message)
+        # 这一条消息关于哪些实体（来自实体索引）。索引是可以整个丢掉重建的，
+        # 所以它缺失时这里只是空列表，消息详情页照样能看。
+        return render_template('message_detail.html', message=message,
+                               entities=_entities_of(message.id))
     
     except Exception as e:
         flash(f'Error loading message: {str(e)}', 'error')
@@ -852,16 +855,34 @@ def entities():
 
     available = pkb_index.available()
     stats = pkb_index.stats() if available else None
+
+    # The raw text lives in *this* database, the entity index in the sidecar, so
+    # the content half of the search is answered here and handed down as ids.
+    # Without it a name-only search misses 奥斯丁 / 学校 / 面试 entirely: the name
+    # the model picked ("Cancun租车预订") is not the word a person types.
+    evidence_ids, results = [], []
+    if available and query:
+        evidence_ids = [row[0] for row in db.session.query(Message.id).filter(
+            Message.content.like('%' + query + '%')).limit(400)]
+        results = pkb_index.search_entities(
+            query=query, kind=kind or None, limit=limit, order=order,
+            evidence_message_ids=evidence_ids)
+        for entity in results:
+            entity['why'] = pkb_index.sample_gist(entity['id'], query)
+    elif available:
+        results = pkb_index.search_entities(kind=kind or None, limit=limit,
+                                            order=order)
+
     return render_template(
         'entities.html',
         available=available,
         stats=stats,
-        entities=pkb_index.search_entities(query=query or None, kind=kind or None,
-                                           limit=limit, order=order) if available else [],
+        entities=results,
         upcoming=pkb_index.upcoming(limit=15) if available else [],
         kinds=[k for k in pkb_index.KIND_ORDER
                if not stats or stats['kinds'].get(k)],
         kind_labels=pkb_index.KIND_LABELS,
+        content_hits=len(evidence_ids),
         q=query, kind=kind, order=order, limit=limit)
 
 
@@ -895,3 +916,13 @@ def entity_detail(entity_id):
         co_entities=pkb_index.co_entities(entity_id),
         timeline=timeline,
         kind_labels=pkb_index.KIND_LABELS)
+
+
+def _entities_of(message_id):
+    """Entities the entity-index says this message is about.
+
+    Returns [] when the index is missing, so a message page never depends on a
+    sidecar database existing.
+    """
+    import pkb_index
+    return pkb_index.entities_for_messages([message_id]).get(message_id, [])

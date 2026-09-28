@@ -74,6 +74,17 @@
 </div>
 {% endif %}
 
+{% if q %}
+<div class="alert alert-light border py-2">
+    搜「<strong>{{ q }}</strong>」命中 <strong>{{ entities|length }}</strong> 个实体
+    （正文命中 {{ content_hits }} 条消息）。
+    <span class="text-muted small">
+        匹配范围＝实体名 + 消息摘要 + <strong>原始正文</strong>。只看实体名不够用：
+        「奥斯丁」名下没有任何实体，但正文里有。
+    </span>
+</div>
+{% endif %}
+
 <div class="row g-3">
     {% for entity in entities %}
     <div class="col-md-6 col-xl-4">
@@ -85,12 +96,24 @@
                             {{ entity.name }}
                         </a>
                         <span class="badge bg-secondary ms-1">{{ kind_labels.get(entity.kind, entity.kind) }}</span>
+                        {% if entity.match == 'name' %}
+                            <span class="badge bg-success-subtle text-success-emphasis" title="实体名里就有这个词">名字命中</span>
+                        {% elif entity.match %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis"
+                                  title="实体名里没有这个词，但相关消息里有">证据命中 {{ entity.match_hits }}</span>
+                        {% endif %}
                     </div>
                     <span class="badge bg-primary rounded-pill" title="提及次数">{{ entity.mentions }}</span>
                 </div>
                 <div class="text-muted small mt-1">
                     {{ (entity.first_ts or '')[:10] }} → {{ (entity.last_ts or '')[:10] }}
                 </div>
+                {% for why in entity.why or [] %}
+                <div class="small mt-1 border-start ps-2">
+                    <a href="{{ url_for('web.message_detail', message_id=why.message_id) }}">{{ why.gist }}</a>
+                    {% if why.event_date %}<span class="badge bg-info text-dark">{{ why.event_date }}</span>{% endif %}
+                </div>
+                {% endfor %}
             </div>
         </div>
     </div>
