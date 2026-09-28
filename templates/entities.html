@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+
+{% block title %}实体 · Message Hub{% endblock %}
+
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center mb-3 gap-2">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-diagram-3"></i> 实体</h4>
+        <div class="text-muted small">
+            {% if stats %}
+                从 <strong>{{ '{:,}'.format(stats.messages) }}</strong> 条原始消息里抽出
+                <strong>{{ '{:,}'.format(stats.entities) }}</strong> 个实体、
+                {{ '{:,}'.format(stats.mentions) }} 次提及；
+                其中 {{ stats.messages_with_date }} 条带事件日期。
+                <br>时间跨度 {{ (stats.first_ts or '')[:10] }} → {{ (stats.last_ts or '')[:10] }}。
+                实体是<strong>索引</strong>，下面每条都能点回原始消息。
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% if not available %}
+<div class="alert alert-warning">
+    <i class="bi bi-exclamation-triangle"></i> 还没有实体索引。
+    在 info_agent 里跑 <code>python -m info_agent.pkb.extract</code>，
+    然后把 <code>pkb/pkb.db</code> 复制到本服务的 <code>instance/pkb.db</code>。
+</div>
+{% else %}
+
+<form class="row g-2 mb-3" method="get" action="{{ url_for('web.entities') }}">
+    <div class="col-auto">
+        <input type="text" class="form-control" name="q" value="{{ q or '' }}"
+               placeholder="搜实体名（中文子串即可）" autofocus>
+    </div>
+    <div class="col-auto">
+        <select class="form-select" name="kind">
+            <option value="">全部类型</option>
+            {% for k in kinds %}
+                <option value="{{ k }}"{% if k == kind %} selected{% endif %}>
+                    {{ kind_labels.get(k, k) }} ({{ stats.kinds.get(k, 0) }})
+                </option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="col-auto">
+        <select class="form-select" name="order">
+            <option value="mentions"{% if order == 'mentions' %} selected{% endif %}>按提及次数</option>
+            <option value="recent"{% if order == 'recent' %} selected{% endif %}>按最近出现</option>
+        </select>
+    </div>
+    <div class="col-auto">
+        <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> 搜索</button>
+        {% if q or kind %}<a class="btn btn-outline-secondary" href="{{ url_for('web.entities') }}">清除</a>{% endif %}
+    </div>
+</form>
+
+{% if upcoming %}
+<div class="card mb-3 border-info">
+    <div class="card-header bg-info-subtle">
+        <i class="bi bi-calendar-event"></i> 接下来会发生什么
+        <span class="text-muted small">（事件日期在今天之后的 {{ upcoming|length }} 条，纯字段比较、零成本）</span>
+    </div>
+    <div class="card-body py-2">
+        {% for item in upcoming %}
+            <div class="d-flex gap-3 py-1">
+                <div class="text-nowrap"><span class="badge bg-info text-dark">{{ item.event_date }}</span></div>
+                <div class="flex-grow-1">
+                    <a href="{{ url_for('web.message_detail', message_id=item.id) }}">{{ item.gist or '(无摘要)' }}</a>
+                    <span class="text-muted small ms-2">{{ item.sender or item.app }}</span>
+                </div>
+            </div>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<div class="row g-3">
+    {% for entity in entities %}
+    <div class="col-md-6 col-xl-4">
+        <div class="card h-100">
+            <div class="card-body py-2">
+                <div class="d-flex justify-content-between align-items-start">
+                    <div>
+                        <a class="fw-semibold" href="{{ url_for('web.entity_detail', entity_id=entity.id) }}">
+                            {{ entity.name }}
+                        </a>
+                        <span class="badge bg-secondary ms-1">{{ kind_labels.get(entity.kind, entity.kind) }}</span>
+                    </div>
+                    <span class="badge bg-primary rounded-pill" title="提及次数">{{ entity.mentions }}</span>
+                </div>
+                <div class="text-muted small mt-1">
+                    {{ (entity.first_ts or '')[:10] }} → {{ (entity.last_ts or '')[:10] }}
+                </div>
+            </div>
+        </div>
+    </div>
+    {% else %}
+    <div class="col-12"><div class="alert alert-secondary">没有匹配的实体。</div></div>
+    {% endfor %}
+</div>
+
+{% if entities|length >= limit %}
+<div class="text-muted small mt-3">只显示前 {{ limit }} 个，缩小搜索范围可以看到更多。</div>
+{% endif %}
+
+{% endif %}
+{% endblock %}

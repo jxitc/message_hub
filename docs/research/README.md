@@ -11,6 +11,7 @@
 | `karpathy-llm-wiki-gist-verbatim.md` | Andrej Karpathy 的 LLM Wiki gist **逐字原文** | 12KB |
 | `obsidian-ai-pkm-report.md` | Obsidian 生态方法论 + AI 插件 + 检索技术调研 | 25KB |
 | `llm-memory-2026-research.md` | 2025–2026 LLM 长期记忆系统（mem0/Letta/Zep/GraphRAG…）调研 | 34KB |
+| `anks-obsidian-pkm-design.md` | **ANKS**（Obsidian 的 AI-native 知识系统）：三平面 / 四坐标 / 人-Agent-程序分工。用户转述 14 篇笔记，**未核验原文** | 8KB |
 
 ### ⚠️ 信源纠正（重要）
 
@@ -57,8 +58,11 @@ schema）；唯一写了自研检索算法的 `cask-wiki` **月下载 24 次**�
 
 1. **确定性结构 + LLM 只碰内容层**
    Karpathy 说 schema 是"关键配置文件"；Obsidian 生态说"绝不让 LLM 决定文件放哪、
-   要不要新建笔记"；记忆系统调研说"写时抽取结构化事实反而掉分"。
+   要不要新建笔记"；记忆系统调研说"写时抽取结构化事实反而掉分"；
+   **ANKS 独立给出同一条，并且更严格：Agent 只产出"分类建议 + 置信度"，不直接操作文件，
+   由确定性 Router 按规则执行。**
    → **落位、frontmatter、索引由代码生成；LLM 只产出实体/要点/关系。**
+   （四个来源、四种语境、同一个答案 —— 可以当定论了。）
 
 2. **不要一上来用向量库**
    Karpathy：~100 源读 `index.md` 就够，*"avoids the need for embedding-based RAG
@@ -99,6 +103,11 @@ schema）；唯一写了自研检索算法的 `cask-wiki` **月下载 24 次**�
 5. **删除是一等公民**：Hindsight 上线后才发现没有 per-fact 删除 API，成了死结。
 6. **别信厂商 benchmark**：Mem0 与 Zep 互相指控（75.14% vs 58.44%）；有厂商的"检索"实为
    全量倾倒；同一家 README 与迁移文档给出两个分数。**唯一可靠的是拿自己 200 条真实查询自测。**
+7. **路径是元数据的投影**（2026-09-21 从 ANKS 借来）：**身份用 UUID，路径由 `(kind, 名字)` 生成，
+   人永不手动移动或重命名 wiki 文件。** 于是"实体合并"退化成改一条 `same_as` 边、文件自动归位，
+   可撤销 —— 这正好解决 `people/zhang-li.md` 与 `people/zhang-lijie.md` 合并后文件怎么办的问题。
+8. **人工审批是一个通用原语**（同上）：低置信 / 高影响的操作 → 进人工队列。
+   实体合并与知识晋升共用同一个 gate，不要各写一套。
 
 ## 中文特有坑
 

@@ -824,3 +824,74 @@ def test_mail_account():
         except Exception:
             pass
         return jsonify({'ok': False, 'message': f'Login ok but SELECT failed: {exc}'}), 200
+
+
+# ---------------------------------------------------------------------------
+# 实体索引（pkb.db）—— 见 pkb_index.py
+#
+# 实体是**索引**，原始消息才是数据。所以这一页的每个链接都必须落回
+# /messages/<id>：一个查不到出处的"实体"没有价值，而这一层随时可以整个重建。
+# ---------------------------------------------------------------------------
+
+def _entity_preview(message, limit=160):
+    """One line of the raw text, so the timeline shows evidence not just a gist."""
+    text = ' '.join((message.content or '').split())
+    if message.type == 'NOTE' and not text:
+        text = ' '.join(((message.message_metadata or {}).get('title') or '').split())
+    return text[:limit] + ('…' if len(text) > limit else '')
+
+
+@web.route('/entities')
+def entities():
+    """Entity index: search, filter by kind, and what is coming up."""
+    import pkb_index
+    query = (request.args.get('q') or '').strip()
+    kind = (request.args.get('kind') or '').strip()
+    order = (request.args.get('order') or 'mentions').strip()
+    limit = min(request.args.get('limit', 120, type=int) or 120, 500)
+
+    available = pkb_index.available()
+    stats = pkb_index.stats() if available else None
+    return render_template(
+        'entities.html',
+        available=available,
+        stats=stats,
+        entities=pkb_index.search_entities(query=query or None, kind=kind or None,
+                                           limit=limit, order=order) if available else [],
+        upcoming=pkb_index.upcoming(limit=15) if available else [],
+        kinds=[k for k in pkb_index.KIND_ORDER
+               if not stats or stats['kinds'].get(k)],
+        kind_labels=pkb_index.KIND_LABELS,
+        q=query, kind=kind, order=order, limit=limit)
+
+
+@web.route('/entities/<int:entity_id>')
+def entity_detail(entity_id):
+    """Everything the hub has about one entity, with the raw messages behind it."""
+    import pkb_index
+    entity = pkb_index.get_entity(entity_id)
+    if entity is None:
+        flash('没有这个实体（索引可能刚重建过，id 会变）。', 'warning')
+        return redirect(url_for('web.entities'))
+
+    gists = pkb_index.gists_for(entity_id)
+    timeline = []
+    for message in Message.query.filter(
+            Message.id.in_(pkb_index.message_ids_for(entity_id))).all():
+        gist, event_date = gists.get(message.id, (None, None))
+        timeline.append({
+            'message': message,
+            'gist': gist,
+            'event_date': event_date,
+            'attachments': (message.message_metadata or {}).get('attachments') or [],
+            'preview': _entity_preview(message),
+        })
+    timeline.sort(key=lambda i: i['message'].timestamp or datetime.min,
+                  reverse=True)
+
+    return render_template(
+        'entity_detail.html',
+        entity=entity,
+        co_entities=pkb_index.co_entities(entity_id),
+        timeline=timeline,
+        kind_labels=pkb_index.KIND_LABELS)

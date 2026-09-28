@@ -46,6 +46,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link{% if request.endpoint and request.endpoint.startswith('web.entity') %} active{% endif %}"
+                           href="{{ url_for('web.entities') }}">
+                            <i class="bi bi-diagram-3"></i> 实体
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link{% if request.endpoint == 'web.status' %} active{% endif %}" 
                            href="{{ url_for('web.status') }}">
                             <i class="bi bi-activity"></i> Status

@@ -76,4 +76,4 @@ def require_api_key():
                     'message': 'Invalid or missing API key'}), 401
 
 
-from . import messages, devices, sync, diagnostics, releases, blobs
+from . import messages, devices, sync, diagnostics, releases, blobs, entities

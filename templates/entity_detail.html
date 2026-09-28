@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+
+{% block title %}{{ entity.name }} · 实体{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-2">
+    <div>
+        <h4 class="mb-1">
+            {{ entity.name }}
+            <span class="badge bg-secondary">{{ kind_labels.get(entity.kind, entity.kind) }}</span>
+        </h4>
+        <div class="text-muted small">
+            {{ entity.mentions }} 次提及 ·
+            {{ (entity.first_ts or '')[:10] }} → {{ (entity.last_ts or '')[:10] }}
+            · 索引键 <code>{{ entity.norm }}</code>
+        </div>
+    </div>
+    <div class="text-nowrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.entities') }}">
+            <i class="bi bi-arrow-left"></i> 回到实体列表
+        </a>
+        <a class="btn btn-sm btn-outline-primary"
+           href="{{ url_for('api_v1.entity_messages', entity_id=entity.id) }}">
+            <i class="bi bi-code-slash"></i> API
+        </a>
+    </div>
+</div>
+
+{% if co_entities %}
+<div class="card mb-3">
+    <div class="card-header py-2">
+        <i class="bi bi-share"></i> 一起出现的实体
+        <span class="text-muted small">（在同一批消息里出现过，按共同出现次数排序——这是"网"的最便宜版本）</span>
+    </div>
+    <div class="card-body py-2">
+        {% for co in co_entities %}
+            <a class="btn btn-sm btn-outline-secondary mb-1 me-1"
+               href="{{ url_for('web.entity_detail', entity_id=co.id) }}">
+                {{ co.name }}
+                <span class="badge bg-light text-dark">{{ co.shared }}</span>
+            </a>
+        {% endfor %}
+    </div>
+</div>
+{% endif %}
+
+<h6 class="mt-4"><i class="bi bi-clock-history"></i> 相关原始消息（{{ timeline|length }}）</h6>
+<div class="text-muted small mb-2">
+    按时间倒序。每条都带模型写的一句话摘要；点标题进原始消息详情。
+</div>
+
+{% for item in timeline %}
+<div class="card mb-2">
+    <div class="card-body py-2">
+        <div class="d-flex justify-content-between">
+            <div class="flex-grow-1">
+                <div class="d-flex gap-2 align-items-baseline">
+                    <span class="text-muted small text-nowrap">{{ (item.message.timestamp or '')|utc_iso }}</span>
+                    {% if item.event_date %}
+                        <span class="badge bg-info text-dark" title="事件日期">{{ item.event_date }}</span>
+                    {% endif %}
+                    <span class="badge bg-light text-dark">{{ item.message.type }}</span>
+                </div>
+                <div class="mt-1">
+                    {% if item.gist %}
+                        <span>{{ item.gist }}</span>
+                    {% else %}
+                        <span class="text-muted">(模型没有给摘要)</span>
+                    {% endif %}
+                </div>
+                <a class="small" href="{{ url_for('web.message_detail', message_id=item.message.id) }}">
+                    查看原始消息（{{ item.message.sender or item.message.source_device_id }}）
+                </a>
+                {% if item.attachments %}
+                    <span class="text-muted small">· {{ item.attachments|length }} 个附件</span>
+                {% endif %}
+            </div>
+        </div>
+        {% if item.preview %}
+        <div class="message-content small text-muted mt-1 border-start ps-2">{{ item.preview }}</div>
+        {% endif %}
+    </div>
+</div>
+{% else %}
+<div class="alert alert-secondary">这个实体没有关联消息。</div>
+{% endfor %}
+{% endblock %}
