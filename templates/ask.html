@@ -45,7 +45,11 @@
 <div class="card mb-4" id="turn-{{ turn.id }}">
     <div class="card-header d-flex justify-content-between align-items-center">
         <span><i class="bi bi-question-circle"></i> {{ turn.question }}</span>
-        <span class="text-muted small">{{ turn.elapsed_ms }} ms</span>
+        <span class="text-muted small">
+            {{ turn.elapsed_ms }} ms ·
+            {{ turn.tokens.prompt or 0 }} + {{ turn.tokens.completion or 0 }} tokens ·
+            <strong>约 {{ currency }}{{ '%.4f'|format(turn.cost or 0) }}</strong>
+        </span>
     </div>
     <div class="card-body">
         <div class="fs-6">{{ linkify(turn.answer, turn.sources or []) }}</div>
@@ -142,7 +146,7 @@
                 <div class="mb-2">
                     <strong>⑤ 每一步的耗时与 tokens</strong>
                     <table class="table table-sm mb-0">
-                        <thead><tr><th>步骤</th><th>耗时</th><th>输入</th><th>输出</th><th>模型</th></tr></thead>
+                        <thead><tr><th>步骤</th><th>耗时</th><th>输入</th><th>输出</th><th>花费</th><th>模型</th></tr></thead>
                         <tbody>
                         {% for step in turn.steps or [] %}
                         <tr>
@@ -150,11 +154,16 @@
                             <td>{{ step.elapsed_ms }} ms</td>
                             <td>{{ (step.tokens or {}).get('prompt_tokens') or '-' }}</td>
                             <td>{{ (step.tokens or {}).get('completion_tokens') or '-' }}</td>
+                            <td>{% if step.cost %}{{ currency }}{{ '%.4f'|format(step.cost) }}{% else %}-{% endif %}</td>
                             <td class="text-muted">{{ (step.tokens or {}).get('model') or '-' }}</td>
                         </tr>
                         {% endfor %}
                         </tbody>
                     </table>
+                </div>
+                <div class="mb-2 text-muted">
+                    花费按配置单价估算：输入 {{ currency }}{{ price_in }}/百万 · 输出 {{ currency }}{{ price_out }}/百万。
+                    供应商调价或换模型时改服务器配置即可，历史记录保留当时的估算值。
                 </div>
                 <div>
                     <strong>⑥ 采用了哪些原文、为什么</strong>
@@ -179,7 +188,7 @@
     评价过的会带标记。<code>/api/v1/qa/turns?rating=bad</code> 就是"要看的清单"。
 </div>
 <table class="table table-sm">
-    <thead><tr><th>时间</th><th>问题</th><th>召回</th><th>评价</th></tr></thead>
+    <thead><tr><th>时间</th><th>问题</th><th>召回</th><th>花费</th><th>评价</th></tr></thead>
     <tbody>
     {% for item in history %}
     <tr id="turn-{{ item.id }}">
@@ -189,6 +198,7 @@
             {% if item.error %}<span class="badge bg-danger">失败</span>{% endif %}
         </td>
         <td class="text-muted small">{{ (item.sources or [])|length }} 条</td>
+        <td class="text-muted small text-nowrap">{{ currency }}{{ '%.4f'|format(item.cost or 0) }}</td>
         <td>
             {% if item.rating == 'good' %}<span class="badge bg-success">👍</span>
             {% elif item.rating == 'bad' %}<span class="badge bg-danger" title="{{ item.rating_note or '' }}">👎</span>
@@ -196,7 +206,7 @@
         </td>
     </tr>
     {% else %}
-    <tr><td colspan="4" class="text-muted">还没有问过。</td></tr>
+    <tr><td colspan="5" class="text-muted">还没有问过。</td></tr>
     {% endfor %}
     </tbody>
 </table>

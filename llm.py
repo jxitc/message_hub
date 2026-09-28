@@ -96,3 +96,19 @@ def chat_json(messages, **kwargs):
         return json.loads(text[start:end + 1]), usage
     except ValueError as exc:
         raise LLMError('模型返回的 JSON 解析失败：%s' % exc)
+
+
+def price(tokens):
+    """按配置单价估算一次调用的花费。
+
+    单价来自 config（默认 ¥2 / ¥8 每百万 token，输入/输出分开），因为金额会随供应商
+    调价、换模型而变——把它写死在代码里，页面上的数字迟早会变成假的。
+    返回 (金额, 币种)；没有 token 信息时返回 (0.0, 币种)。
+    """
+    from flask import current_app as app
+    usage = tokens or {}
+    prompt = usage.get('prompt_tokens') or 0
+    completion = usage.get('completion_tokens') or 0
+    total = (prompt / 1e6) * app.config.get('LLM_PRICE_INPUT_PER_M', 2.0) \
+        + (completion / 1e6) * app.config.get('LLM_PRICE_OUTPUT_PER_M', 8.0)
+    return round(total, 6), app.config.get('LLM_PRICE_CURRENCY', '¥')

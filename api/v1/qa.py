@@ -70,10 +70,14 @@ def qa_ask():
     turn.steps = result['steps']
     turn.cited = result['cited']
     turn.elapsed_ms = result['elapsed_ms']
+    turn.cost = result['cost']
+    turn.tokens_prompt = result['tokens']['prompt']
+    turn.tokens_completion = result['tokens']['completion']
     db.session.add(turn)
     db.session.commit()
 
     return jsonify({'turn': turn.to_dict(),
+                    'cost': result['cost'], 'currency': result['currency'],
                     'citations': [s for i, s in enumerate(result['sources'], 1)
                                   if i in result['cited']]})
 

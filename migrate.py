@@ -10,7 +10,10 @@ Migrations:
    ``original_to``) out of email metadata, leaving ``recipients`` as the single
    source of truth. See build_payload() in mail_collector.py.
 3. add ``messages.natural_key`` + its unique index (idempotent ingest,
-   2026-09-20). The index is created on an all-NULL column, so it can be added
+   2026-09-20).
+4. add ``qa_turns.cost`` / ``tokens_prompt`` / ``tokens_completion`` (问答花费,
+   2026-09-28). `db.create_all()` does not add columns to a table that already
+   exists — the same trap as ``natural_key``. The index is created on an all-NULL column, so it can be added
    before the historical duplicates are cleaned: SQL treats NULLs as distinct,
    and ``scripts/dedup-messages.py`` fills the column in afterwards.
 
@@ -115,12 +118,45 @@ def add_natural_key(engine):
     return changed
 
 
+#: (table, column, DDL type) added after the fact. `create_all()` only creates
+#: missing *tables*, so every column added to an existing table needs a step here.
+ADDED_COLUMNS = (
+    ('qa_turns', 'cost', 'FLOAT'),
+    ('qa_turns', 'tokens_prompt', 'INTEGER'),
+    ('qa_turns', 'tokens_completion', 'INTEGER'),
+)
+
+
+def add_missing_columns(engine):
+    """ALTER TABLE ... ADD COLUMN for columns added to existing tables (idempotent)."""
+    inspector = inspect(engine)
+    tables = set(inspector.get_table_names())
+    added = 0
+    for table, column, ddl_type in ADDED_COLUMNS:
+        if table not in tables:
+            print("migrate: table '%s' does not exist yet — skipping %s" % (table, column))
+            continue
+        cols = {c['name'] for c in inspector.get_columns(table)}
+        if column in cols:
+            continue
+        with engine.connect() as conn:
+            conn.execute(text('ALTER TABLE "%s" ADD COLUMN "%s" %s'
+                              % (table, column, ddl_type)))
+            conn.commit()
+        print('migrate: added column %s.%s' % (table, column))
+        added += 1
+    if not added:
+        print('migrate: no missing columns to add')
+    return added
+
+
 def run_all():
     engine = _engine()
     print(f"migrate: engine = {engine.url.render_as_string(hide_password=True)}")
     drop_column_if_exists(engine, 'messages', 'is_read')
     strip_redundant_recipient_keys(engine)
     add_natural_key(engine)
+    add_missing_columns(engine)
     print("migrate: done")
 
 

@@ -983,6 +983,9 @@ def ask():
             turn.steps = result['steps']
             turn.cited = result['cited']
             turn.elapsed_ms = result['elapsed_ms']
+            turn.cost = result['cost']
+            turn.tokens_prompt = result['tokens']['prompt']
+            turn.tokens_completion = result['tokens']['completion']
             db.session.add(turn)
             db.session.commit()
         except llm.LLMError as exc:
@@ -995,6 +998,9 @@ def ask():
     return render_template('ask.html', question=question, turn=turn, error=error,
                            history=history,
                            linkify=_linkify_citations,
+                           currency=current_app.config.get('LLM_PRICE_CURRENCY', '¥'),
+                           price_in=current_app.config.get('LLM_PRICE_INPUT_PER_M'),
+                           price_out=current_app.config.get('LLM_PRICE_OUTPUT_PER_M'),
                            llm_ready=llm.configured())
 
 

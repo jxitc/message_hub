@@ -34,6 +34,12 @@ class Config:
     # 一次问答最多往上下文里塞多少东西（字符）。召回可以宽，喂进去必须封顶，
     # 否则一个问题就能把整库塞满。
     QA_MAX_CONTEXT_CHARS = int(os.environ.get('QA_MAX_CONTEXT_CHARS') or 40000)
+    # 每次问答花多少钱：单价写在配置里，页面显示的是**按这个单价估算**的值。
+    # 为什么不写死一个数：供应商改价、换模型、换供应商都会让硬编码的金额变成谎话，
+    # 而"这是按配置单价算的"永远是实话。
+    LLM_PRICE_INPUT_PER_M = float(os.environ.get('LLM_PRICE_INPUT_PER_M') or 2.0)
+    LLM_PRICE_OUTPUT_PER_M = float(os.environ.get('LLM_PRICE_OUTPUT_PER_M') or 8.0)
+    LLM_PRICE_CURRENCY = os.environ.get('LLM_PRICE_CURRENCY') or '¥'
     QA_MAX_SOURCES = int(os.environ.get('QA_MAX_SOURCES') or 40)
 
     # Message settings

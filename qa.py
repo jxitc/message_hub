@@ -42,6 +42,8 @@ MAX_SOURCE_EXCERPT = 700
 
 def _step(name, **fields):
     fields['step'] = name
+    if fields.get('tokens'):
+        fields['cost'], fields['currency'] = llm.price(fields['tokens'])
     return fields
 
 
@@ -334,7 +336,14 @@ def ask(question, history=None, source='web'):
                        tokens=usage, model=usage.get('model'),
                        cited=cited, context_chars=sum(len(s['text']) for s in sources)))
 
+    total_cost = sum(step.get('cost') or 0 for step in steps)
     return {
+        'cost': round(total_cost, 6),
+        'currency': current_app.config.get('LLM_PRICE_CURRENCY', '¥'),
+        'tokens': {
+            'prompt': sum((s.get('tokens') or {}).get('prompt_tokens') or 0 for s in steps),
+            'completion': sum((s.get('tokens') or {}).get('completion_tokens') or 0 for s in steps),
+        },
         'question': question,
         'rewritten': rewritten,
         'keywords': keywords,

@@ -29,6 +29,11 @@ class QaTurn(db.Model):
     cited = db.Column(db.JSON, default=list)
 
     elapsed_ms = db.Column(db.Integer)
+    #: 按配置单价估算的花费（元）。存的是当时的估算，不是"现在的单价再算一遍"——
+    #: 单价会变，历史记录应该保留它当时的样子。
+    cost = db.Column(db.Float)
+    tokens_prompt = db.Column(db.Integer)
+    tokens_completion = db.Column(db.Integer)
     #: 谁问的：web | android。手机端要拉自己的历史，所以要区分。
     source = db.Column(db.String(32), default='web', index=True)
     #: 会话分组：手机端每个聊天会话一个 id；网页端暂用 'web'。
@@ -54,6 +59,9 @@ class QaTurn(db.Model):
             'cited': self.cited or [],
             'source_count': len(self.sources or []),
             'elapsed_ms': self.elapsed_ms,
+            'cost': self.cost,
+            'tokens': {'prompt': self.tokens_prompt,
+                       'completion': self.tokens_completion},
             'source': self.source,
             'conversation_id': self.conversation_id,
             'rating': self.rating,
