@@ -332,3 +332,24 @@ def upcoming(limit=40):
         return []
     finally:
         conn.close()
+
+
+def messages_matching_gist(term, limit=30):
+    """Messages whose one-line summary contains `term`.
+
+    A separate route because a message can be thin in raw text (an
+    attachment-only note) while its gist carries the whole meaning, and because
+    the gist is the only place some recalled context exists in short form.
+    """
+    conn = _connect()
+    if conn is None or not term:
+        return []
+    try:
+        like = '%' + term + '%'
+        return [{'id': r['id'], 'gist': r['gist']} for r in conn.execute(
+            'SELECT id, gist FROM messages WHERE gist LIKE ? '
+            'ORDER BY ts DESC LIMIT ?', (like, limit))]
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()

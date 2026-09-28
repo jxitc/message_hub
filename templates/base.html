@@ -52,6 +52,12 @@
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link{% if request.endpoint == 'web.ask' %} active{% endif %}"
+                           href="{{ url_for('web.ask') }}">
+                            <i class="bi bi-chat-square-text"></i> 问一句
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link{% if request.endpoint == 'web.status' %} active{% endif %}" 
                            href="{{ url_for('web.status') }}">
                             <i class="bi bi-activity"></i> Status

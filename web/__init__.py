@@ -29,6 +29,15 @@ def _page_href(page):
     return url_for('web.messages', **args)
 
 
+def _enumerate_from(seq, start=1):
+    """enumerate() in a template, so the citation number matches the answer's [n].
+
+    回答里的 [3] 必须和列表里第 3 条对得上，所以编号只能由"列表位置"决定，
+    不能在模板里各算各的。
+    """
+    return list(enumerate(seq or [], start))
+
+
 def _attachment_url(key):
     """Signed, expiring download URL for the web UI.
 
@@ -58,3 +67,5 @@ web.add_app_template_global(_attachment_url, 'attachment_url')
 web.add_app_template_global(_page_href, 'page_href')
 
 from . import views
+
+web.add_app_template_filter(_enumerate_from, 'enumerate_from')

@@ -3,7 +3,7 @@ from sqlalchemy import desc, func
 from datetime import datetime, timezone, timedelta
 from marshmallow import ValidationError
 
-from models import db, Message, Device
+from models import db, Message, Device, QaTurn
 from . import web
 import requests
 import json
@@ -11,6 +11,8 @@ import os
 import threading
 import time
 import copy
+
+import re
 
 import message_filters as _mf
 import message_identity
@@ -926,3 +928,95 @@ def _entities_of(message_id):
     """
     import pkb_index
     return pkb_index.entities_for_messages([message_id]).get(message_id, [])
+
+
+# ---------------------------------------------------------------------------
+# 问答（RAG）—— 见 qa.py
+#
+# 这个页面刻意不用 fetch/JSON 做：服务端渲染意味着手机浏览器、桌面浏览器、
+# 以及"我直接 curl 一下"看到的是同一个东西，而这条链路本身还在调试期，
+# 少一层前端状态就少一类"到底是哪边错了"。
+# ---------------------------------------------------------------------------
+
+def _linkify_citations(answer, sources):
+    """把回答里的 [3] 变成指向原始消息的链接。
+
+    先转义再替换：模型偶尔会在回答里带上 HTML 味的字符，直接 mark_safe 会开一个
+    XSS 口子——这是"用户自己库里的内容"，但库里就有别人发来的短信。
+    """
+    from markupsafe import Markup, escape
+
+    def replace(match):
+        index = int(match.group(1))
+        if not 1 <= index <= len(sources):
+            return match.group(0)
+        source = sources[index - 1]
+        return Markup('<a href="%s" class="badge bg-primary text-decoration-none" '
+                      'title="%s">[%d]</a>') % (
+            url_for('web.message_detail', message_id=source['id']),
+            escape(source['text'][:120]), index)
+
+    text = str(escape(answer or ''))
+    text = re.sub(r'\[(\d{1,3})\]', replace, text)
+    return Markup('<br>'.join(text.split('\n')))
+
+
+@web.route('/ask', methods=['GET', 'POST'])
+def ask():
+    """问一句，看回答，并看它是怎么被找出来的。"""
+    import llm
+    import qa
+
+    question = (request.form.get('question') or request.args.get('question') or '').strip()
+    turn = error = None
+    answering = False
+
+    if request.method == 'POST' and question:
+        turn = QaTurn(question=question, source='web', conversation_id='web')
+        try:
+            result = qa.ask(question, history=_recent_qa_history(), source='web')
+            turn.rewritten = result['rewritten']
+            turn.answer = result['answer']
+            turn.keywords = result['keywords']
+            turn.entities = result['entities']
+            turn.sources = result['sources']
+            turn.steps = result['steps']
+            turn.cited = result['cited']
+            turn.elapsed_ms = result['elapsed_ms']
+            db.session.add(turn)
+            db.session.commit()
+        except llm.LLMError as exc:
+            turn.error = str(exc)
+            db.session.add(turn)
+            db.session.commit()
+            error = str(exc)
+
+    history = (QaTurn.query.order_by(QaTurn.created_at.desc()).limit(20).all())
+    return render_template('ask.html', question=question, turn=turn, error=error,
+                           history=history,
+                           linkify=_linkify_citations,
+                           llm_ready=llm.configured())
+
+
+def _recent_qa_history(limit=3):
+    turns = (QaTurn.query.filter(QaTurn.error.is_(None))
+             .order_by(QaTurn.created_at.desc()).limit(limit).all())
+    return [{'question': t.question, 'answer': t.answer} for t in reversed(turns)]
+
+
+@web.route('/ask/rate/<turn_id>', methods=['POST'])
+def ask_rate(turn_id):
+    """good / bad —— 这就是以后 debug 的入口。"""
+    turn = QaTurn.query.get(turn_id)
+    if turn is None:
+        flash('找不到这条问答记录。', 'warning')
+        return redirect(url_for('web.ask'))
+    rating = (request.form.get('rating') or '').strip()
+    turn.rating = rating if rating in ('good', 'bad') else None
+    turn.rating_note = (request.form.get('note') or '').strip() or None
+    from datetime import timezone as _tz
+    turn.rated_at = datetime.now(_tz.utc) if turn.rating else None
+    db.session.commit()
+    flash('已记录评价：%s。' % (turn.rating or '已取消'),
+          'success' if turn.rating == 'good' else 'warning')
+    return redirect(url_for('web.ask') + '#turn-' + turn.id)

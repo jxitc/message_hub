@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+
+{% block title %}问答 · Message Hub{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-3">
+    <div>
+        <h4 class="mb-1"><i class="bi bi-chat-square-text"></i> 问知识库</h4>
+        <div class="text-muted small">
+            流程：<strong>改写问题 → 抽实体 → 召回原文 → 作答</strong>。
+            每一步都记在这一页里，回答错了就能看出是哪一步错的。
+        </div>
+    </div>
+    <div class="text-nowrap">
+        <a class="btn btn-sm btn-outline-secondary" href="{{ url_for('web.entities') }}">
+            <i class="bi bi-diagram-3"></i> 实体
+        </a>
+    </div>
+</div>
+
+{% if not llm_ready %}
+<div class="alert alert-warning">
+    服务器没有配置 <code>LLM_API_KEY</code>，问答不可用。在服务器 <code>.env</code>
+    里加一行 <code>LLM_API_KEY=...</code> 然后重启服务。
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('web.ask') }}" class="mb-4">
+    <div class="input-group">
+        <input type="text" class="form-control form-control-lg" name="question"
+               value="{{ question or '' }}" autofocus
+               placeholder="比如：我给简单心理一共付了多少钱？退了没有？">
+        <button class="btn btn-primary btn-lg" type="submit">
+            <i class="bi bi-search"></i> 问
+        </button>
+    </div>
+    <div class="form-text">问完可以按 👍 / 👎 标记好坏——以后 debug 就靠这个筛。</div>
+</form>
+
+{% if error %}
+<div class="alert alert-danger"><i class="bi bi-x-octagon"></i> {{ error }}</div>
+{% endif %}
+
+{% if turn %}
+<div class="card mb-4" id="turn-{{ turn.id }}">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-question-circle"></i> {{ turn.question }}</span>
+        <span class="text-muted small">{{ turn.elapsed_ms }} ms</span>
+    </div>
+    <div class="card-body">
+        <div class="fs-6">{{ linkify(turn.answer, turn.sources or []) }}</div>
+
+        {% if turn.cited %}
+        <div class="mt-3">
+            <div class="text-muted small mb-1">用到的原文（点编号或标题都能回到原始消息）：</div>
+            {% for index, source in turn.sources|enumerate_from(1) %}
+                {% if index in turn.cited %}
+                <div class="small mb-1">
+                    <span class="badge bg-primary">[{{ index }}]</span>
+                    <span class="text-muted">{{ (source.timestamp or '')[:16] }} · {{ source.type }}</span>
+                    <a href="{{ url_for('web.message_detail', message_id=source.id) }}">
+                        {{ source.text[:70] }}
+                    </a>
+                </div>
+                {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        <div class="mt-3">
+            <form method="post" action="{{ url_for('web.ask_rate', turn_id=turn.id) }}"
+                  class="row g-2 align-items-center">
+                <div class="col-auto">
+                    <button class="btn btn-sm {% if turn.rating == 'good' %}btn-success{% else %}btn-outline-success{% endif %}"
+                            name="rating" value="good" type="submit">👍 好</button>
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-sm {% if turn.rating == 'bad' %}btn-danger{% else %}btn-outline-danger{% endif %}"
+                            name="rating" value="bad" type="submit">👎 差</button>
+                </div>
+                <div class="col">
+                    <input type="text" class="form-control form-control-sm" name="note"
+                           value="{{ turn.rating_note or '' }}" placeholder="备注（可选）：哪里不对？">
+                </div>
+                {% if turn.rating %}
+                <div class="col-auto">
+                    <button class="btn btn-sm btn-outline-secondary" name="rating" value="" type="submit">取消评价</button>
+                </div>
+                {% endif %}
+            </form>
+            {% if turn.rating %}
+            <div class="form-text">当前评价：<strong>{{ turn.rating }}</strong>
+                {% if turn.rating_note %}（{{ turn.rating_note }}）{% endif %}</div>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="card-footer p-0">
+        <details>
+            <summary class="p-2 small text-muted" style="cursor:pointer">
+                看这一步步是怎么走的（改写 / 实体 / 召回 / 耗时 / tokens）
+            </summary>
+            <div class="p-3 border-top bg-body-tertiary small">
+                <div class="mb-2">
+                    <strong>① 改写问题</strong>
+                    <div class="ms-3">原问题：{{ turn.question }}</div>
+                    <div class="ms-3">改写为：{{ turn.rewritten }}</div>
+                </div>
+                <div class="mb-2">
+                    <strong>② 抽出的实体</strong>
+                    <div class="ms-3">
+                        {% for e in turn.entities or [] %}
+                            <span class="badge bg-secondary">{{ e.name }} <span class="text-white-50">{{ e.kind }}</span></span>
+                        {% else %}<span class="text-muted">（没抽到实体）</span>{% endfor %}
+                    </div>
+                </div>
+                <div class="mb-2">
+                    <strong>③ 检索词</strong>
+                    <div class="ms-3">
+                        {% for k in turn.keywords or [] %}<code class="me-1">{{ k }}</code>{% endfor %}
+                    </div>
+                </div>
+                {% for step in turn.steps or [] %}
+                    {% if step.step == 'recall' %}
+                    <div class="mb-2">
+                        <strong>④ 召回</strong>
+                        <span class="text-muted">候选 {{ step.counts.candidates }} 条 → 采用 {{ step.counts.used }} 条；
+                            命中实体 {{ step.counts.entities_hit }} 个，检索词 {{ step.counts.text_terms }} 个</span>
+                        {% if step.entities_hit %}
+                        <div class="ms-3">命中实体：
+                            {% for e in step.entities_hit %}
+                                <a href="{{ url_for('web.entity_detail', entity_id=e.id) }}">{{ e.name }}</a>({{ e.mentions }}){% if not loop.last %},{% endif %}
+                            {% endfor %}
+                        </div>
+                        {% endif %}
+                        <div class="ms-3 text-muted">按词命中：
+                            {% for b in step.by_text %}{{ b.term }}={{ b.messages }}{% if not loop.last %} · {% endif %}{% endfor %}
+                        </div>
+                    </div>
+                    {% endif %}
+                {% endfor %}
+                <div class="mb-2">
+                    <strong>⑤ 每一步的耗时与 tokens</strong>
+                    <table class="table table-sm mb-0">
+                        <thead><tr><th>步骤</th><th>耗时</th><th>输入</th><th>输出</th><th>模型</th></tr></thead>
+                        <tbody>
+                        {% for step in turn.steps or [] %}
+                        <tr>
+                            <td>{{ step.step }}</td>
+                            <td>{{ step.elapsed_ms }} ms</td>
+                            <td>{{ (step.tokens or {}).get('prompt_tokens') or '-' }}</td>
+                            <td>{{ (step.tokens or {}).get('completion_tokens') or '-' }}</td>
+                            <td class="text-muted">{{ (step.tokens or {}).get('model') or '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                <div>
+                    <strong>⑥ 采用了哪些原文、为什么</strong>
+                    <div class="ms-3">
+                        {% for source in turn.sources or [] %}
+                        <div class="mb-1">
+                            <span class="badge bg-light text-dark">[{{ loop.index }}]</span>
+                            <a href="{{ url_for('web.message_detail', message_id=source.id) }}">{{ source.text[:56] }}</a>
+                            <span class="text-muted">← {{ source.why|join(' + ') }}</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </details>
+    </div>
+</div>
+{% endif %}
+
+<h6 class="mt-4"><i class="bi bi-clock-history"></i> 问过的（{{ history|length }}）</h6>
+<div class="text-muted small mb-2">
+    评价过的会带标记。<code>/api/v1/qa/turns?rating=bad</code> 就是"要看的清单"。
+</div>
+<table class="table table-sm">
+    <thead><tr><th>时间</th><th>问题</th><th>召回</th><th>评价</th></tr></thead>
+    <tbody>
+    {% for item in history %}
+    <tr id="turn-{{ item.id }}">
+        <td class="text-nowrap text-muted small">{{ (item.created_at.isoformat() if item.created_at else '')[:16] }}</td>
+        <td>
+            <a href="{{ url_for('web.ask') }}?question={{ item.question|urlencode }}">{{ item.question[:60] }}</a>
+            {% if item.error %}<span class="badge bg-danger">失败</span>{% endif %}
+        </td>
+        <td class="text-muted small">{{ (item.sources or [])|length }} 条</td>
+        <td>
+            {% if item.rating == 'good' %}<span class="badge bg-success">👍</span>
+            {% elif item.rating == 'bad' %}<span class="badge bg-danger" title="{{ item.rating_note or '' }}">👎</span>
+            {% else %}<span class="text-muted small">—</span>{% endif %}
+        </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="text-muted">还没有问过。</td></tr>
+    {% endfor %}
+    </tbody>
+</table>
+{% endblock %}
