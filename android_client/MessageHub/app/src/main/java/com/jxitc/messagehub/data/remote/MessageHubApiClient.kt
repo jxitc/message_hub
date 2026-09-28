@@ -3,11 +3,16 @@ package com.jxitc.messagehub.data.remote
 import com.jxitc.messagehub.data.local.AppPreferences
 import com.jxitc.messagehub.domain.model.AttachmentLimits
 import com.jxitc.messagehub.domain.model.AttachmentPayload
+import com.jxitc.messagehub.domain.model.ChatMessage
+import com.jxitc.messagehub.domain.model.ChatRating
+import com.jxitc.messagehub.domain.model.ChatRatingUpdate
 import com.jxitc.messagehub.domain.model.ExtractionStatus
 import com.jxitc.messagehub.domain.model.Memory
 import com.jxitc.messagehub.domain.model.MemoryCreationRequest
 import com.jxitc.messagehub.domain.model.MessageAttachmentDetail
 import com.jxitc.messagehub.domain.model.ProcessingResult
+import com.jxitc.messagehub.domain.model.QaThread
+import com.jxitc.messagehub.domain.service.ChatFormat
 import com.jxitc.messagehub.utils.Logger
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -26,7 +31,7 @@ import java.util.concurrent.TimeUnit
  */
 class MessageHubApiClient(
     private val preferences: AppPreferences
-) {
+) : QaRemoteSource {
 
     // HTTP logging: BASIC only (method/URL/status/timing).
     //
@@ -83,6 +88,33 @@ class MessageHubApiClient(
             .addConverterFactory(GsonConverterFactory.create())
             .build()
         
+        return retrofit.create(MessageHubApiService::class.java)
+    }
+
+    /**
+     * 问答专用的读超时：**120 秒**，而不是上传用的 30 秒。
+     *
+     * `/qa/ask` 是一次四步 LLM pipeline（改写 → 抽实体 → 召回 → 生成），实测 ~3 秒，
+     * 但慢模型、长上下文、服务端重试都可能到几十秒 —— 沿用 30 秒会把"答案马上要出来了"
+     * 变成一次网络错误，用户看到的是"连接失败"，而服务器其实答完了。
+     *
+     * 用 `newBuilder()` 而不是另造客户端：连接池、拦截器（含 `X-API-Key` 那层）都跟着走，
+     * 只改超时这一件事。
+     */
+    private val qaOkHttpClient by lazy {
+        okHttpClient.newBuilder()
+            .readTimeout(120, TimeUnit.SECONDS)
+            .callTimeout(180, TimeUnit.SECONDS)
+            .build()
+    }
+
+    private fun createQaApiService(): MessageHubApiService {
+        val retrofit = Retrofit.Builder()
+            .baseUrl(preferences.effectiveServerUrl.ensureTrailingSlash())
+            .client(qaOkHttpClient)
+            .addConverterFactory(GsonConverterFactory.create())
+            .build()
+
         return retrofit.create(MessageHubApiService::class.java)
     }
 
@@ -273,6 +305,143 @@ class MessageHubApiClient(
             } catch (e: Exception) {
                 Logger.w("Attachment status query failed for $serverMessageId: ${e.message}")
                 ProcessingResult.Error("Connection failed: ${e.message}")
+            }
+        }
+    }
+
+    // ========================================================================
+    // 问知识库（qa）—— 见 QaRemoteSource
+    // ========================================================================
+
+    /**
+     * `POST /api/v1/qa/ask`：一次问答返回答案 + 整条 pipeline + turn id。
+     *
+     * 服务器**失败也留痕**（502 带 `turn_id`），所以这里的 Error 只是"这次没答上来"，
+     * 不代表服务器那边没记录。
+     */
+    override suspend fun askQuestion(question: String): ProcessingResult<ChatMessage> {
+        val asked = question.trim()
+        if (asked.isEmpty()) return ProcessingResult.Error("问题不能为空")
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = createQaApiService().askQuestion(
+                    QaAskRequest(
+                        question = asked,
+                        conversationId = QaThread.conversationId(preferences.deviceId),
+                        source = QaThread.SOURCE
+                    )
+                )
+                if (!response.isSuccessful) {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
+                    Logger.e("QA ask failed: $errorMsg")
+                    return@withContext ProcessingResult.Error(errorMsg)
+                }
+                val turn = response.body()?.turn?.toDomain()
+                if (turn == null) {
+                    Logger.e("QA ask returned no turn (HTTP ${response.code()})")
+                    return@withContext ProcessingResult.Error("服务器返回的问答记录不完整")
+                }
+                Logger.i(
+                    "QA answered in ${turn.elapsedMs}ms: ${turn.sources.size} source(s), " +
+                        "cited=${turn.cited}, cost=${turn.cost?.let { ChatFormat.money(it) }}"
+                )
+                ProcessingResult.Success(turn)
+            } catch (e: Exception) {
+                Logger.e("QA ask failed: ${e.message}", e)
+                ProcessingResult.Error("连接失败：${e.message}")
+            }
+        }
+    }
+
+    /** `GET /api/v1/qa/turns`：聊天历史，最新在前，**不带** steps/sources。 */
+    override suspend fun fetchTurns(limit: Int): ProcessingResult<List<ChatMessage>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = createQaApiService().getQaTurns(
+                    limit = limit,
+                    conversationId = QaThread.conversationId(preferences.deviceId)
+                )
+                if (response.isSuccessful) {
+                    val turns = response.body()?.turns.orEmpty().mapNotNull { it.toDomain() }
+                    Logger.i("QA history: ${turns.size} turn(s) from server")
+                    ProcessingResult.Success(turns)
+                } else {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
+                    Logger.w("QA history unavailable: $errorMsg")
+                    ProcessingResult.Error(errorMsg)
+                }
+            } catch (e: Exception) {
+                Logger.w("QA history request failed: ${e.message}")
+                ProcessingResult.Error("连接失败：${e.message}")
+            }
+        }
+    }
+
+    /** `GET /api/v1/qa/turns/<id>`：补齐某条历史的完整过程。 */
+    override suspend fun fetchTurn(turnId: String): ProcessingResult<ChatMessage> {
+        if (turnId.isBlank()) return ProcessingResult.Error("缺少问答 id")
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = createQaApiService().getQaTurn(turnId)
+                if (!response.isSuccessful) {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
+                    Logger.w("QA turn $turnId unavailable: $errorMsg")
+                    return@withContext ProcessingResult.Error(errorMsg)
+                }
+                val turn = response.body()?.turn?.toDomain()
+                if (turn == null) ProcessingResult.Error("服务器返回的问答记录不完整")
+                else ProcessingResult.Success(turn)
+            } catch (e: Exception) {
+                Logger.w("QA turn $turnId request failed: ${e.message}")
+                ProcessingResult.Error("连接失败：${e.message}")
+            }
+        }
+    }
+
+    /** `POST /api/v1/qa/turns/<id>/rate`：[rating] 传 null 表示取消评价。 */
+    override suspend fun rateTurn(
+        turnId: String,
+        rating: ChatRating?,
+        note: String?
+    ): ProcessingResult<ChatRatingUpdate> {
+        if (turnId.isBlank()) return ProcessingResult.Error("缺少问答 id")
+        return withContext(Dispatchers.IO) {
+            try {
+                val response = createQaApiService().rateQaTurn(
+                    id = turnId,
+                    // 取消评价按契约发空串（服务器把 ''/none/clear/null 归一成"没评"）
+                    request = QaRateRequest(rating = rating?.wire ?: "", note = note)
+                )
+                if (!response.isSuccessful) {
+                    val errorMsg = ApiErrorMapper.describe(
+                        code = response.code(),
+                        rawErrorBody = response.errorBody()?.string(),
+                        statusMessage = response.message()
+                    )
+                    Logger.w("QA rate failed for $turnId: $errorMsg")
+                    return@withContext ProcessingResult.Error(errorMsg)
+                }
+                val update = response.body()?.toDomain()
+                if (update == null) ProcessingResult.Error("服务器没有确认这次评价")
+                else {
+                    Logger.i("QA turn $turnId rated: ${update.rating?.wire ?: "（取消）"}")
+                    ProcessingResult.Success(update)
+                }
+            } catch (e: Exception) {
+                Logger.w("QA rate request failed for $turnId: ${e.message}")
+                ProcessingResult.Error("连接失败：${e.message}")
             }
         }
     }

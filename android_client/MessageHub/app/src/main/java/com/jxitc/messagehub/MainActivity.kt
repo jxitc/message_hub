@@ -20,6 +20,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.jxitc.messagehub.domain.model.ProcessingResult
 import com.jxitc.messagehub.presentation.screen.AddMemoryScreen
+import com.jxitc.messagehub.presentation.screen.ChatScreen
 import com.jxitc.messagehub.presentation.screen.MemoryListScreen
 import com.jxitc.messagehub.presentation.screen.SettingsScreen
 import com.jxitc.messagehub.ui.theme.MessageHubTheme
@@ -116,6 +117,9 @@ fun MessageHubApp(
                     onNavigateToSettings = {
                         navController.navigate("settings")
                     },
+                    onNavigateToChat = {
+                        navController.navigate("chat")
+                    },
                     // 附件原件的地址一律用 key + 配置的 serverUrl 拼（不用接口返回的 url）
                     blobUrlFor = appContainer.apiClient::blobUrlFor,
                     onOpenOriginal = { attachment ->
@@ -157,6 +161,16 @@ fun MessageHubApp(
                         navController.popBackStack()
                     },
                     requestPermissions = requestPermissions
+                )
+            }
+
+            composable("chat") {
+                val viewModel = remember { appContainer.createChatViewModel() }
+                ChatScreen(
+                    viewModel = viewModel,
+                    onNavigateBack = {
+                        navController.popBackStack()
+                    }
                 )
             }
         }

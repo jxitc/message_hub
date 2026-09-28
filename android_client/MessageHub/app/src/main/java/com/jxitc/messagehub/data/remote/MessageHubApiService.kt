@@ -12,6 +12,9 @@ import retrofit2.http.*
  *  - GET  /api/v1/messages   -> list messages with pagination
  *  - GET  /api/v1/messages/<id> -> one message (attachment extraction status)
  *  - GET  /api/v1/attachments/limits -> attachment size cap + allowed types
+ *  - POST /api/v1/qa/ask     -> ask the knowledge base (answer + whole pipeline)
+ *  - GET  /api/v1/qa/turns   -> chat history
+ *  - POST /api/v1/qa/turns/<id>/rate -> rate one answer
  *  - GET  /health            -> health check {"status":"healthy",...}
  */
 interface MessageHubApiService {
@@ -55,6 +58,36 @@ interface MessageHubApiService {
         @Query("device") device: String? = null,
         @Query("type") type: String? = null
     ): Response<MessageListResponse>
+
+    // ------------------------------------------------------------------
+    // 问知识库（qa）：提问 / 历史 / 单条详情 / 评价
+    // ------------------------------------------------------------------
+
+    /** 问一次：服务器一条 POST 就回"答案 + 整条 pipeline"，不用客户端再问第二次。 */
+    @POST("api/v1/qa/ask")
+    suspend fun askQuestion(
+        @Body request: QaAskRequest
+    ): Response<QaAskResponse>
+
+    /** 聊天历史，**最新在前**。不带 steps/sources（详情按 id 单独取）。 */
+    @GET("api/v1/qa/turns")
+    suspend fun getQaTurns(
+        @Query("limit") limit: Int = 30,
+        @Query("conversation_id") conversationId: String? = null
+    ): Response<QaTurnsResponse>
+
+    /** 单条 turn 的完整过程（含 steps/sources）。 */
+    @GET("api/v1/qa/turns/{id}")
+    suspend fun getQaTurn(
+        @Path("id") id: String
+    ): Response<QaTurnResponse>
+
+    /** 评价：`{"rating":"good"}` / `{"rating":"bad","note":"…"}` / `{"rating":""}` 取消。 */
+    @POST("api/v1/qa/turns/{id}/rate")
+    suspend fun rateQaTurn(
+        @Path("id") id: String,
+        @Body request: QaRateRequest
+    ): Response<QaRateResponse>
 
     @GET("health")
     suspend fun healthCheck(): Response<Map<String, Any>>

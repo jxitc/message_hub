@@ -9,8 +9,10 @@ import com.jxitc.messagehub.data.attachment.AttachmentDownloader
 import com.jxitc.messagehub.data.attachment.AttachmentPreparer
 import com.jxitc.messagehub.data.attachment.AttachmentReader
 import com.jxitc.messagehub.data.database.MessageHubDatabase
+import com.jxitc.messagehub.data.repository.ChatRepositoryImpl
 import com.jxitc.messagehub.data.repository.MemoryRepositoryImpl
 import com.jxitc.messagehub.domain.model.ProcessingResult
+import com.jxitc.messagehub.domain.repository.ChatRepository
 import com.jxitc.messagehub.domain.repository.MemoryRepository
 import com.jxitc.messagehub.domain.usecase.CreateMemoryUseCase
 import com.jxitc.messagehub.domain.usecase.GetMemoriesUseCase
@@ -23,6 +25,7 @@ import com.jxitc.messagehub.data.local.AppPreferences
 import com.jxitc.messagehub.data.remote.MessageHubApiClient
 import com.jxitc.messagehub.data.remote.UpdateChecker
 import com.jxitc.messagehub.presentation.viewmodel.AddMemoryViewModel
+import com.jxitc.messagehub.presentation.viewmodel.ChatViewModel
 import com.jxitc.messagehub.presentation.viewmodel.MemoryListViewModel
 import com.jxitc.messagehub.presentation.viewmodel.SettingsViewModel
 import kotlinx.coroutines.flow.first
@@ -154,6 +157,19 @@ class AppContainer(private val context: Context) {
     
     fun createSettingsViewModel(): SettingsViewModel {
         return SettingsViewModel(appPreferences, apiClient, updateChecker)
+    }
+
+    /**
+     * 问答聊天：Room 当缓存，服务器当事实来源。
+     *
+     * apiClient 同时是 QaRemoteSource（它自己实现的那四个方法），不需要另造网络对象。
+     */
+    val chatRepository: ChatRepository by lazy {
+        ChatRepositoryImpl(database.chatMessageDao(), apiClient)
+    }
+
+    fun createChatViewModel(): ChatViewModel {
+        return ChatViewModel(chatRepository)
     }
 
     companion object {

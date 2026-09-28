@@ -55,6 +55,7 @@ fun MemoryListScreen(
     viewModel: MemoryListViewModel,
     onNavigateToAddMemory: () -> Unit = {},
     onNavigateToSettings: () -> Unit = {},
+    onNavigateToChat: () -> Unit = {},
     blockedApps: Set<String> = emptySet(),
     onToggleBlock: (String) -> Unit = {},
     /** 附件下载地址一律用 key + serverUrl 拼（见 AttachmentUrls），所以在页面里传入。 */
@@ -90,6 +91,11 @@ fun MemoryListScreen(
         TopAppBar(
             title = { Text("My Memories") },
             actions = {
+                // 「问知识库」用文字而不是图标：material-icons-core 里没有聊天/问答图标，
+                // 为它引 material-icons-extended（几 MB）不值当，文字还更清楚。
+                TextButton(onClick = onNavigateToChat) {
+                    Text("问知识库")
+                }
                 IconButton(onClick = viewModel::refreshMemories) {
                     Icon(Icons.Default.Refresh, contentDescription = "Refresh")
                 }
