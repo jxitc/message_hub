@@ -38,7 +38,17 @@ from models import db, Message
 #: A step record. Kept as a plain dict list (JSON column) rather than its own
 #: table: a step only ever means something together with its turn, and one row
 #: per question keeps the history query trivial.
-MAX_SOURCE_EXCERPT = 700
+#:
+#: How much of one message reaches the model. The old single 700-character cap
+#: was measured against the live hub and thrown away most of the OCR: a message
+#: whose attachments hold 31,964 characters arrived as 701, and the attachment
+#: that answered the question was simply not in the context. Hence a budget split
+#: by role instead of one truncation from the front — the body is prose the
+#: channel wrote, the attachments are the documents, and the documents are
+#: usually why the message was recalled at all.
+BODY_EXCERPT = 1200
+ATTACHMENT_EXCERPT = 2000
+MAX_SOURCE_EXCERPT = 5000
 
 
 def _step(name, **fields):
@@ -48,26 +58,47 @@ def _step(name, **fields):
     return fields
 
 
-def _excerpt(text, limit=MAX_SOURCE_EXCERPT):
+def _excerpt(text, limit):
     text = ' '.join((text or '').split())
     return text[:limit] + ('…' if len(text) > limit else '')
 
 
-def _message_text(message):
-    """Everything worth showing the model about one message."""
+def _message_text(message, budget=None):
+    """Everything worth showing the model about one message, within `budget` chars.
+
+    Each attachment gets its own slice rather than competing with the body for one
+    shared cap: a long email body used to consume the whole allowance and leave
+    every attachment invisibly truncated. Recall decides *which* messages matter;
+    this decides how much of each is shown, and it must not silently drop the part
+    that made the message worth recalling.
+    """
+    budget = budget or MAX_SOURCE_EXCERPT
     metadata = message.message_metadata or {}
-    parts = []
-    if metadata.get('title') or metadata.get('subject'):
-        parts.append(str(metadata.get('title') or metadata.get('subject')))
+    head = str(metadata.get('title') or metadata.get('subject') or '').strip()
+    prefix = []
+    if head:
+        prefix.append(head)
     if message.sender:
-        parts.append('来源: %s' % message.sender)
-    if message.content:
-        parts.append(message.content)
+        prefix.append('来源: %s' % message.sender)
+    used = len(' '.join(prefix))
+
+    parts = list(prefix)
+    body = _excerpt(message.content, min(BODY_EXCERPT, max(budget - used, 0)))
+    if body:
+        parts.append(body)
+        used += len(body)
+
     for attachment in metadata.get('attachments') or []:
+        remaining = budget - used
+        if remaining <= 200:            # 剩下的塞不下有意义的一段，就别硬塞
+            break
         extracted = (attachment.get('extraction') or {}).get('text')
-        if extracted:
-            parts.append('[附件 %s] %s' % (attachment.get('name'), extracted))
-    return _excerpt(' '.join(parts))
+        if not extracted:
+            continue
+        chunk = _excerpt(extracted, min(ATTACHMENT_EXCERPT, remaining))
+        parts.append('[附件 %s] %s' % (attachment.get('name'), chunk))
+        used += len(chunk)
+    return ' '.join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -305,16 +336,20 @@ def answer(question, rewritten, sources, history=None):
         return ('库里没有找到和这个问题相关的记录。可以换个说法，或者告诉我更具体的'
                 '人名/机构/时间，我再找一次。', {}, [])
 
+    budget = current_app.config.get('QA_MAX_CONTEXT_CHARS', 60000)
+    # 每条来源平分预算，而不是"拼完再从头上截掉尾巴"——后者会让排在后面的来源整条
+    # 消失（排序靠后不等于不相关），而且一条长消息就能吃掉全部预算。
+    per_source = max(1500, budget // max(len(sources), 1))
+
     blocks = []
     for index, source in enumerate(sources, 1):
         when = (source['timestamp'] or '')[:19]
+        text = source['text']
+        if len(text) > per_source:
+            text = text[:per_source] + '…'
         blocks.append('[%d] 收到 %s | %s | %s\n%s'
-                      % (index, when, source['type'], source['sender'] or '',
-                         source['text']))
+                      % (index, when, source['type'], source['sender'] or '', text))
     context = '\n\n'.join(blocks)
-    budget = current_app.config.get('QA_MAX_CONTEXT_CHARS', 40000)
-    if len(context) > budget:
-        context = context[:budget] + '\n\n…（更多记录已省略）'
 
     messages = [{'role': 'system', 'content': ANSWER_PROMPT}]
     if history:
