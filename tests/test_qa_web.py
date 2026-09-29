@@ -127,3 +127,61 @@ class TestTokenShape:
             db.session.commit()
             assert turn.tokens == {'prompt': 10, 'completion': 5}
             assert turn.to_dict()['tokens'] == turn.tokens
+
+
+class TestRatingAndNoteAreIndependent:
+    """评价与备注是两次调用，各自的语义必须固定。
+
+    设计是"先点赞（一次点击，评价绝不丢）→ 再弹对话框问还有什么意见"。
+    这就要求**不带 rating 只发 note** 也能工作。原来的实现把"没带 rating"读成
+    "清空评价"，那样保存备注会把刚点的赞一起抹掉。
+    """
+
+    def _turn(self, app, client, stub_pipeline):
+        client.post('/ask', data={'question': 'x'})
+        with app.app_context():
+            return db.session.query(QaTurn.id).first()[0]
+
+    def _api(self, client, auth_headers, turn_id, payload):
+        return client.post('/api/v1/qa/turns/%s/rate' % turn_id, json=payload,
+                           headers=auth_headers)
+
+    def test_rating_then_note_keeps_the_rating(self, app, client, auth_headers,
+                                               stub_pipeline):
+        turn_id = self._turn(app, client, stub_pipeline)
+
+        assert self._api(client, auth_headers, turn_id,
+                         {'rating': 'bad'}).get_json()['rating'] == 'bad'
+        # 弹窗里只填意见，不带 rating
+        body = self._api(client, auth_headers, turn_id,
+                         {'note': '召回漏了附件'}).get_json()
+        assert body['rating'] == 'bad', '保存备注不能把评价清掉'
+        assert body['rating_note'] == '召回漏了附件'
+
+    def test_rating_and_note_together(self, app, client, auth_headers, stub_pipeline):
+        turn_id = self._turn(app, client, stub_pipeline)
+        body = self._api(client, auth_headers, turn_id,
+                         {'rating': 'good', 'note': '答得准'}).get_json()
+        assert (body['rating'], body['rating_note']) == ('good', '答得准')
+
+    def test_an_empty_note_deletes_it_without_touching_the_rating(
+            self, app, client, auth_headers, stub_pipeline):
+        turn_id = self._turn(app, client, stub_pipeline)
+        self._api(client, auth_headers, turn_id, {'rating': 'bad', 'note': '写错了'})
+        body = self._api(client, auth_headers, turn_id, {'note': ''}).get_json()
+        assert body['rating'] == 'bad'
+        assert body['rating_note'] is None
+
+    def test_clearing_the_rating_clears_the_note_too(self, app, client,
+                                                     auth_headers, stub_pipeline):
+        """留一条没有评价的备注谁也读不懂。"""
+        turn_id = self._turn(app, client, stub_pipeline)
+        self._api(client, auth_headers, turn_id, {'rating': 'bad', 'note': 'x'})
+        body = self._api(client, auth_headers, turn_id, {'rating': ''}).get_json()
+        assert body['rating'] is None and body['rating_note'] is None
+
+    def test_a_note_without_any_rating_is_refused_quietly(self, app, client,
+                                                          auth_headers, stub_pipeline):
+        turn_id = self._turn(app, client, stub_pipeline)
+        body = self._api(client, auth_headers, turn_id, {'note': '没点赞就写意见'}).get_json()
+        assert body['rating'] is None and body['rating_note'] is None

@@ -111,27 +111,47 @@ def qa_turn(turn_id):
 
 @api_v1.route('/qa/turns/<turn_id>/rate', methods=['POST'])
 def qa_rate(turn_id):
-    """Record a good/bad judgement on one answer.
+    """Record a good/bad judgement on one answer, and optionally a note about it.
 
     This is the whole debugging loop: `GET /qa/turns?rating=bad` is the list of
     questions to actually look at, and because the turn stores its own steps, the
     failure is already localised to a step when you open it.
+
+    **Fields are independent.** The client asks for the rating first (one tap, so
+    the judgement is never lost) and then pops a dialog for the free text. That
+    requires posting a note *without* repeating the rating — and the previous
+    version could not express that: a missing `rating` was read as "clear it", so
+    saving the note would have wiped the rating. Now the presence of the key is
+    what decides:
+
+        {"rating": "good"}                 set the rating, keep the note
+        {"rating": "good", "note": "..."}  set both
+        {"note": "..."}                    update the note only
+        {"rating": ""}                     clear the rating (and the note)
     """
     turn = QaTurn.query.get(turn_id)
     if turn is None:
         return jsonify({'error': 'Turn not found'}), 404
 
     payload = request.get_json(silent=True) or {}
-    rating = (payload.get('rating') or '').strip().lower()
-    if rating in ('', 'none', 'clear', 'null'):
-        rating = None
-    elif rating not in ('good', 'bad'):
-        return jsonify({'error': "rating 只能是 good / bad（或 null 取消）"}), 400
-
-    turn.rating = rating
-    turn.rating_note = (payload.get('note') or None)
     from datetime import datetime, timezone
-    turn.rated_at = datetime.now(timezone.utc) if rating else None
+
+    if 'rating' in payload:
+        rating = (payload.get('rating') or '').strip().lower()
+        if rating in ('', 'none', 'clear', 'null'):
+            rating = None
+        elif rating not in ('good', 'bad'):
+            return jsonify({'error': "rating 只能是 good / bad（或省略表示不改）"}), 400
+        turn.rating = rating
+        turn.rated_at = datetime.now(timezone.utc) if rating else None
+        if rating is None:
+            # 取消评价时连备注一起清掉：留一条没有评价的备注谁也读不懂
+            turn.rating_note = None
+
+    if 'note' in payload and turn.rating:
+        # 空字符串表示"把备注删掉"，而不是"没带这个字段"
+        turn.rating_note = (payload.get('note') or '').strip() or None
+
     db.session.commit()
     return jsonify({'id': turn.id, 'rating': turn.rating,
                     'rating_note': turn.rating_note})
