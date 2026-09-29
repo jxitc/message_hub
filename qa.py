@@ -29,6 +29,7 @@ import re
 import time
 
 from flask import current_app
+from sqlalchemy import Text, cast, or_
 
 import llm
 import pkb_index
@@ -126,6 +127,38 @@ def _wants_schedule(rewritten, keywords):
     return any(word in blob for word in SCHEDULE_WORDS)
 
 
+def _message_match_conditions(term):
+    """WHERE conditions matching `term` in a message's text *or* its attachments.
+
+    Two things this fixes, both measured on the live database:
+
+    1. **Attachment text was not searched at all.** It lives in
+       `metadata.attachments[].extraction.text`, not in `content`, so a keyword
+       that only appears in a scanned document found nothing: `PASSPORT` 0 → 6
+       messages, `G43934807` 0 → 6, `Terminal 5` 0 → 2, `驾驶证` 0 → 1. That is
+       most of what OCR is for.
+
+    2. **Non-ASCII in JSON is stored escaped.** SQLAlchemy's JSON column writes
+       through `json.dumps`, which escapes non-ASCII: **not one row in this
+       database holds a literal Chinese character in its metadata** (2,628 rows
+       carry `\\uXXXX`). So `metadata LIKE '%护照%'` can never match, while
+       `'%PASSPORT%'` can. A Chinese keyword has to be matched against the
+       *escaped* form, which `json.dumps` produces for us.
+
+    Both spellings are tried, so this keeps working if the stored form is ever
+    changed to literal text.
+    """
+    patterns = {'%' + term + '%'}
+    escaped = json.dumps(term, ensure_ascii=True)[1:-1]
+    if escaped != term:
+        patterns.add('%' + escaped + '%')
+    conditions = []
+    for pattern in patterns:
+        conditions.append(Message.content.like(pattern))
+        conditions.append(cast(Message.message_metadata, Text).like(pattern))
+    return conditions
+
+
 def recall(rewritten, keywords, entities, limit=None):
     """Find candidate messages, and record exactly why each one came back.
 
@@ -188,11 +221,11 @@ def recall(rewritten, keywords, entities, limit=None):
             terms.append(term)
     for term in terms[:14]:
         rows = (db.session.query(Message.id)
-                .filter(Message.content.like('%' + term + '%'))
+                .filter(or_(*_message_match_conditions(term)))
                 .limit(60).all())
         trace['by_text'].append({'term': term, 'messages': len(rows)})
         for (message_id,) in rows:
-            add(message_id, 'text', '正文含「%s」' % term)
+            add(message_id, 'text', '正文或附件含「%s」' % term)
 
     # gist route: the entity index's one-line summaries, which cover messages
     # whose raw text is thin (an attachment-only note).
