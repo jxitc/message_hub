@@ -604,3 +604,137 @@ Time:...`），显示层又要剥一遍，冗余不正式。
 - **发版**：**1.6.6 (code 14)**，24.9MB，已发布到线上并核对
   （`/api/v1/releases/latest-info` 返回 versionCode 14、`/latest` 实测下载 26,146,879 字节）。
   手机在 App 内点更新即可装到修好的这版。
+
+## 2026-09-22（文档打开追踪 Phase 1：mhblob 上的匿名静态图 + 请求日志）
+
+背景：想知道分享出去的 Google Doc **被谁打开过**。方案是追踪像素——文档里插一张指向
+我们服务器的图，有人打开就会回来请求。Phase 1 不做记录逻辑，只先证明
+「这张图能被插进文档并加载」；证明不了，后面都白写。
+
+- **落位**：公开 URL `https://mhblob.jxitc.com/t/<slug>.png` → `/var/www/mhblob/t/`，
+  由 nginx **静态读磁盘**。新增 `deploy/nginx/mh-track-location.conf`（安装到
+  `/etc/nginx/snippets/`）、`deploy/nginx/mh-track-log.conf`（安装到 `/etc/nginx/conf.d/`）。
+- **为什么必须绕过应用**（关键约束）：应用那条 `/api/v1/blobs/<key>` **要鉴权**
+  （X-API-Key / HMAC token），而 Google Docs 抓图带不了我们的 header 或 token；
+  签名 URL 又会过期 → 文档里留破图。且追踪图不能因应用重启就 404。
+  `/t/` 目录里只有我们自己放的 png，没有用户上传物，不涉及「独立源」那套 XSS 顾虑。
+- **为什么自建日志格式 `mhtrack`**：橙云之后 `$remote_addr` 只是 CF 边缘 IP，
+  真客户端在 `CF-Connecting-IP` 里。JSON 一行一条，同时留 `client_ip`/`edge_ip`/`xff`
+  以便分辨"是 CF 记错了还是我们读错了"，另记 `country`/`accept_language`/`ua`/`referer`
+  ——无登录身份时这几样是区分人最有效的字段。
+- **刻意不允许缓存**：`no-store` + `Pragma: no-cache`，实测 CF 返回 `cf-cache-status: BYPASS`
+  （不是 HIT）。任何一层缓存都会让"每次打开都回来问一次"不成立。
+- **图片可复现**：新增 `deploy/track/make-track-image.py`（Pillow；`--pixel` 出 1x1），
+  测试图 800×220 蓝底白字、写上 slug/URL/生成时间——看得见才能用眼睛确认加载成功。
+  `deploy/track/assets/mh-test-v1.png`（24KB）入库，`deploy.sh` 会同步到 `/var/www/mhblob/t/`。
+- **deploy.sh**：新增幂等块维护上述配置。vhost 里的 `include` 行**只在缺失时用 awk 插入**
+  （不用 `sed '0,/re/'`——GNU sed 那个地址形式只认 `/` 作分隔符，而插入的注释里就有
+  `/t/<slug>.png`，一撞就 `unknown option to 's'`，本次真踩了）。vhost 含 certbot 追加的
+  TLS 行，绝不整体重写；改前已备份到 `/root/nginx-backups/`。
+- **线上验证**：`https://mhblob.jxitc.com/t/mh-test-v1.png` → 200 `image/png`、
+  24,312 字节与本地原件 `sha256` 一致（`b3ca09ef…da4a`）；连测两次均 `cf-cache-status: BYPASS`；
+  `/t/nope.png` → 404；**回归**：应用那条路径无 token 仍 401（没被新 location 影响）；
+  直连源站也 200。日志实测按 JSON 落盘：`client_ip=185.182.52.70`/`country=GB`/`ua=curl/8.4.0`
+  （直连源站时 `client_ip` 为空而 `edge_ip` 是真 IP——正是两个字段都留的意义）。
+  幂等演练：对 vhost 副本连跑两次插入逻辑，`include` 行数恒为 1。
+- **⚠️ 已记录但尚未证实的风险**：Google Docs 很可能把外部图片**抓取后转存到
+  `googleusercontent.com`** 再发给读者（Gmail 图片代理同理）。若如此，我们的服务器
+  只会在"图被插入文档的那一刻"被 Google 抓一次，此后不同的人打开**都不会**产生新请求，
+  追踪像素在 Docs 上等于失效。日志能直接分辨这两种情况（Google 的 IP/UA vs 读者的 IP/UA），
+  Phase 1 的验收标准就是：插进去 → 换账号打开 → 看有没有第二次、来自读者 IP 的请求。
+  若确认走代理，替代路线是 **Drive Activity API**（直接给 `view` 的 actor + 时间戳）。
+- **未做（Phase 2）**：每文档一个 slug、落库（含 bot/预览过滤）、`/track/<slug>` 报告页。
+- 新文档：`docs/doc-open-tracking.md`。
+
+## 2026-09-22（文档打开追踪：实测判定像素方案在 Google Docs 上失效）
+
+承接上一条 Phase 1。目标从"能插进去"推进到"能不能追踪"，**结论是否定的，且已实测**。
+
+- **实验设计**：把同一个 URL 上的图换成橙色 v2（字节数 24312 → 30500，肉眼与日志双重可辨），
+  请文档所有者刷新 7 次（含强制刷新）**并在手机上再打开一次**。
+- **结果**：服务器收到 **0 个请求**，日志停在 13 条（末条是部署自测 curl）；文档始终显示 v1。
+  原因在日志里看得很清楚——插入那一刻 Google 抓了两次，之后再也不来：
+  `google-proxy-66-249-93-100`（`via ggpht.com GoogleImageProxy`，即那个"下载图片并用自己的
+  基础设施转发"的图片代理）与 `google-proxy-192-178-10-2`（`GoogleDocs; documents`）。
+  **插入即被代管成副本**，`no-store` / 换字节 / 换颜色一概无效。
+- **顺手排除的第二条路**：`Drive Activity API` **官方规范里没有"观看"动作**——v2 discovery
+  文档中 `ActionDetail` 只有 appliedLabelChange/comment/create/delete/dlpChange/edit/move/
+  permissionChange/reference/rename/restore/settingsChange。不是权限或 OAuth 的问题，
+  **Google 不暴露这个数据面**。查的是线上 `$discovery/rest?version=v2`，不是二手资料。
+- **Workspace Activity dashboard 的硬边界**（唯一官方的"谁看过"）：
+  ① 文档必须由 work/school 账号拥有——`If the file isn't owned by a Google Account through
+  work or school, no one can see the view history.`，**所以"把文档转移所有权到个人账号"会
+  让观看记录当场消失**（这是个反直觉的坑，差点做了）；② 只记**登录**用户，匿名读者不出现；
+  ③ 读者可自行关闭 `Show my view history`，关掉的观看永远不会出现；④ **没有 API**，只能人肉看。
+- **一句话根因**：要让读者的浏览器来问我们一次，内容就必须由我们提供；而 Docs 是封闭渲染
+  环境（图片被代管、链接要点击、嵌入对象归 Google 托管）。"Docs + 无感 + 拿到是谁"三者
+  同时成立不存在。剩下唯一真能满足"无感 + 每次打开都记 + 真实 IP"的做法是**内容由自己域名提供**。
+- **产出**：`docs/doc-open-tracking.md` 补上"实测结论"一节（含判定表与官方原文引用，
+  便于以后遇到 Gmail 等同类代管平台直接复用）。
+- **未定**：`mhimg.jxitc.com` 的 DNS 记录（灰云、ttl 600）先留着不删；Phase 2 未动工。
+
+## 2026-09-28 ~ 09-29（实体索引搬进 hub + 问答流水线 + 三个"信息在库里却答不出来"的 bug）
+
+**这一段的流水账、当前状态快照与召回优化交接在 [`running-log.md`](running-log.md)。**
+下面只记变更本身。
+
+### 实体索引：从 info_agent 搬进 message_hub
+
+抽取器原先住在 `info_agent/info_agent/pkb/`（早期 PKB 实验的目录），但实体索引已经
+不是实验：它有 REST API、有网页界面、问答流水线依赖它。**产出 hub 契约的一部分的
+程序，就该和读它的 `pkb_index.py` 待在同一个仓库。**
+
+顺带解决了一个具体麻烦：它以前读的是"从 hub 库里 dump 出来的 JSON"，而索引靠**手工**
+更新（笔记本上跑完再 scp）——**hub 每天进新消息，索引会悄悄过期，而且没有任何东西会
+告诉你它过期了**。现在它直连 hub 的库，并挂上 systemd 定时器
+（`message-hub-pkb.timer`，**每小时增量**：实测 1–2 秒 / ¥0.00；全量 82 秒 / ¥1.27）。
+
+搬的过程中修掉两个真 bug：**① 提及数偏低**——发信号码传播跑在统计之后，被传播补上的
+提及永远没被算进计数（实测 4 个实体"记 2 实际 4"）。修法不是加测试，是**把两步合成
+`finalise()`，让错误顺序写不出来**；**② 传播规则太宽**——只发过两条的号码、一条命中就
+把另一条也挂上，加了 `min_shared=2`。
+
+细节：`docs/entity-index.md`。
+
+### 实体浏览与搜索（网页 `/entities`）
+
+**搜"实体名"搜不到东西**：`奥斯丁` 0 条、`学校` 0 条、`面试` 0 条——因为模型给实体起的
+名字不是人会打的词（那笔租车叫「Cancun租车预订」）。改成三路匹配（实体名 + 消息摘要 +
+**原始正文**），每条标注**为什么命中**，并加了「接下来会发生什么」面板（纯字段比较、零成本）。
+
+### 问答流水线（`qa.py` / `/ask` / `/api/v1/qa/*`）
+
+**改写 → 抽实体 → 召回 → 作答**，每一步的输入输出、耗时、tokens、花费全部记进 `qa_turns`，
+因为**答错之后要能回答"是哪一步错的"**。召回四路（实体/正文/摘要/日历）并集；
+网页与手机共用同一批问答记录（手机按 deviceId 分会话）；👍/👎 就是调试入口
+（`GET /api/v1/qa/turns?rating=bad`）。
+
+### 三个"召回对了但答不出来"的 bug（都先量后改）
+
+| 问题 | 实测 |
+| --- | --- |
+| 关键词召回只搜 `Message.content`，不搜附件 OCR 文本 | `PASSPORT` 0→6、`G43934807` 0→6、`Terminal 5` 0→2、`驾驶证` 0→1 |
+| 同一件事第二层：**JSON 列里的中文是 `\uXXXX` 转义** | 全库 0 行含字面中文（2,628 行转义），`metadata LIKE '%护照%'` 永远 0；`护照` 4→15 |
+| 每条消息只送 **700 字**给模型 | 一条消息附件文本 31,964 字 → 实际只送 701 字；**191 个回填附件的文本模型基本看不到** |
+
+第三条是"修完 OCR 仍然答不出来"的最终原因：正文与附件现在各有额度（1200/2000），
+且组装上下文时**按来源平分预算**，而不是拼完从头截掉尾巴（后者让排后面的来源整条消失）。
+
+### OCR：服务器组件没换，离线重跑 + 回填
+
+病根不是"OCR 失败"：护照扫描件的 tesseract 文本里**有**机读区的有效期编码，只是没人解码；
+**印上去的字段**才是真没读出来。失败的那一类很集中——**81 个附件文本不足 100 字，
+其中 76 个是图片，几乎全是证件**（护照、BRP、驾照、身份证、医保卡），
+正是"高密度小字 + 拍摄时占画面一小块"。
+
+做法：拉到 Mac 用 macOS Vision 重跑 → `scripts/backfill-ocr.py` 回填（默认演练）。
+三批共处理 300 个附件、186 个变好，**回填 191 处 / +59,066 字**。
+回填脚本三条纪律：**独立复核**（挡下 115 个 Vision 反而更差的）、**保留旧值痕迹**、
+**deepcopy 后整体赋值**。细节：`docs/ocr.md`。
+
+### 手机端
+
+新增「问知识库」聊天页（1.6.7 / code 15）：气泡、答案带引用编号、每条显示耗时/tokens/花费、
+可展开的「过程」面板（改写、实体、检索词、召回统计、每条原文为什么被召回）、👍/👎。
+聊天记录**以服务器为准 + 本地缓存**；会话按 **deviceId** 分开（两台手机各一条历史）。
+Room v2→v3 显式迁移，无破坏性回退。实测 213 个单测通过。
